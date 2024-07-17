@@ -1,0 +1,96 @@
+<?xml version="1.0"?>
+<robot name="simple_quadcopter">
+  <!-- Base link -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.6"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.02"/>
+    </inertial>
+      <visual>
+        <geometry>
+            <mesh filename="package://drone.stl" scale="1 1 1"/>
+        </geometry>
+    </visual>
+  </link>
+
+  <!-- Propellers -->
+  <link name="propeller_1">
+    <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.1"/>
+        <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.02"/>
+    </inertial>
+    <visual>
+        <geometry>
+            <cylinder length="0.01" radius="0.3"/>
+        </geometry>
+    </visual>
+  </link>
+  <link name="propeller_2">
+    <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.1"/>
+        <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.02"/>
+    </inertial>
+    <visual>
+        <geometry>
+            <cylinder length="0.01" radius="0.3"/>
+        </geometry>
+    </visual>
+  </link>
+<link name="propeller_3">
+    <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.1"/>
+        <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.02"/>
+    </inertial>
+    <visual>
+        <geometry>
+            <cylinder length="0.01" radius="0.3"/>
+        </geometry>
+    </visual>
+  </link>
+
+<link name="propeller_4">
+    <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.1"/>
+        <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.02"/>
+    </inertial>
+    <visual>
+        <geometry>
+            <cylinder length="0.01" radius="0.3"/>
+        </geometry>
+    </visual>
+  </link>
+
+  <!-- Joints connecting propellers to base -->
+  <joint name="joint_propeller_1" type="fixed">
+    <parent link="base_link"/>
+    <child link="propeller_1"/>
+    <origin xyz="1.2 1.2 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <joint name="joint_propeller_2" type="fixed">
+    <parent link="base_link"/>
+    <child link="propeller_2"/>
+    <origin xyz="-1.2 1.2 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <joint name="joint_propeller_3" type="fixed">
+    <parent link="base_link"/>
+    <child link="propeller_3"/>
+    <origin xyz="1.2 -1.2 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <joint name="joint_propeller_4" type="fixed">
+    <parent link="base_link"/>
+    <child link="propeller_4"/>
+    <origin xyz="-1.2 -1.2 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+</robot>
