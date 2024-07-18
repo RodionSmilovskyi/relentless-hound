@@ -30,7 +30,7 @@ def calc_logprob(mu_v, var_v, actions_v):
 def train():
     env = RecordVideo(
         CvWrapper(ApproachEnv(globals.USE_GUI)),
-        f"{globals.OUTPUT_PATH}/records",
+        f"{globals.OUTPUT_PATH}/data",
         episode_trigger=lambda episode_number: episode_number % 500 == 0,
         name_prefix=datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"),
     )
