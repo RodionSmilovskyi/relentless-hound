@@ -203,7 +203,7 @@ class Env(gym.Env):
         results = [hit[2] * MAX_DISTANCE for hit in ray_result if hit[0] == self.target_id]
         
         if len(results):
-            return min(results) /self.initial_dist         
+            return min(results)       
         
-        return MAX_DISTANCE /self.initial_dist
+        return MAX_DISTANCE
 

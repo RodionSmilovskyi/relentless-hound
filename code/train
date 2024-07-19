@@ -26,12 +26,17 @@ def calc_logprob(mu_v, var_v, actions_v):
     p2 = -tf.math.log(tf.sqrt(2 * math.pi * var_v))
     return p1 + p2
 
+def episode_trigger_fn(episode_number):
+    if episode_number == 0 or episode_number == globals.EPISODES - 1:
+        return True
+    else:
+        return (episode_number + 1) % globals.EPISODE_TRIGGER_STEP == 0
 
 def train():
     env = RecordVideo(
         CvWrapper(ApproachEnv(globals.USE_GUI)),
         f"{globals.OUTPUT_PATH}/data",
-        episode_trigger=lambda episode_number: episode_number % 500 == 0,
+        episode_trigger = episode_trigger_fn,
         name_prefix=datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"),
     )
 
@@ -132,6 +137,7 @@ if __name__ == "__main__":
     parser.add_argument("--use-gui", action='store_true')
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--prefix", type=str, default = os.path.dirname(os.path.abspath(__file__)))
+    parser.add_argument("--episode-trigger-step", type=int, default=1000)
     
     args = parser.parse_args()
     
@@ -141,6 +147,7 @@ if __name__ == "__main__":
     globals.MODEL_PATH = os.path.join(args.prefix, 'model')
     globals.USE_GUI = args.use_gui
     globals.EPISODES = args.episodes
+    globals.EPISODE_TRIGGER_STEP = args.episode_trigger_step
     
     file_writer = tf.summary.create_file_writer(globals.OUTPUT_PATH + "/tensorboard")
     file_writer.set_as_default()

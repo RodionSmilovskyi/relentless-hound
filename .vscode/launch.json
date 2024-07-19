@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "code/train",
             "console": "integratedTerminal",
-            "args": ["--use-gui"]
+            "args": ["--use-gui", "--episode-trigger-step", "5", "--episodes", "10"]
         }
     ]
 }
