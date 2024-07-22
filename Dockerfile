@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM tensorflow/tensorflow:2.16.1-gpu
+FROM tensorflow/tensorflow:2.15.0-gpu
 
 COPY code /opt/program
 
@@ -10,7 +10,7 @@ WORKDIR /opt/program
 
 RUN chmod a+x train 
 
-RUN pip install -r requirements.txt
+RUN pip install -r docker_requirements.txt
 
 RUN rm -rf output
 

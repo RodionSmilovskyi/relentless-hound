@@ -1,8 +1,6 @@
-tensorflow==2.16.1
-tensorboard==2.16.2
+tensorboard==2.15.0
 tensorboard-data-server==0.7.2
 numpy==1.26.4
 pybullet==3.2.6
 moviepy==1.0.3
-gymnasium==0.29.1
-keras==3.3.3
+tf-agents[reverb]==0.19.0

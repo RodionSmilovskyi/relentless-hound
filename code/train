@@ -1,30 +1,27 @@
 #!/usr/bin/env python
 
 import sys
-import numpy as np
-import gymnasium as gym
-import tensorflow as tf
-import keras
-import datetime
-import os
-from keras import ops
-from a2cAgent import A2CAgent
-from cv_wrapper import CvWrapper
-from reward_wrapper import RewardWrapper
-from env import Env as ApproachEnv
-from gymnasium.wrappers import RecordVideo, FrameStack
-import math
-import time
-import argparse
 import globals
+import numpy as np
+import gym
+import tensorflow as tf
+import os
+import argparse
+import random
+import time
 
-def calc_logprob(mu_v, var_v, actions_v):
-    var_v = tf.clip_by_value(
-        var_v, clip_value_min=1e-3, clip_value_max=tf.reduce_max(var_v)
-    )
-    p1 = -((mu_v - actions_v) ** 2) / (2 * var_v)
-    p2 = -tf.math.log(tf.sqrt(2 * math.pi * var_v))
-    return p1 + p2
+from gym.spaces import Discrete, Box
+from gym.wrappers import FrameStack
+from typing import Optional
+
+from tf_agents.environments.gym_wrapper import GymWrapper
+from env.drone_env import DroneEnv
+from env.cv_wrapper import CvWrapper
+from env.reward_wrapper import RewardWrapper
+from tf_agents.trajectories import time_step as ts
+
+os.environ['TF_USE_LEGACY_KERAS'] = '1'
+
 
 def episode_trigger_fn(episode_number):
     if episode_number == 0 or episode_number == globals.EPISODES - 1:
@@ -32,128 +29,62 @@ def episode_trigger_fn(episode_number):
     else:
         return (episode_number + 1) % globals.EPISODE_TRIGGER_STEP == 0
 
+
 def train():
-    env = RecordVideo(
-        CvWrapper(ApproachEnv(globals.USE_GUI)),
-        f"{globals.OUTPUT_PATH}/data",
-        episode_trigger = episode_trigger_fn,
-        name_prefix=datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"),
-    )
-
-    env = RewardWrapper(FrameStack(env, 4))
-    agent = A2CAgent(env.observation_space.shape, env.action_space.shape[0])
-
-    # Number of episodes
     n_episodes = globals.EPISODES
-    action_probs_history = []
-    critic_value_history = []
-    rewards_history = []
-    optimizer = keras.optimizers.Adam(learning_rate=0.01)
-    huber_loss = keras.losses.Huber()
-    seed = 42
-    gamma = 0.99  # Discount factor for past rewards
-    eps = np.finfo(np.float32).eps.item()
-    running_reward = 0
+    gym_env = RewardWrapper(FrameStack(CvWrapper(DroneEnv(globals.USE_GUI)), 4))
+    
+    env = GymWrapper(gym_env)
 
     start_time = time.time()
-
-    for episode in range(n_episodes):
-        state, _ = env.reset()
-        terminated = False
-        episode_reward = 0
-
-        with tf.GradientTape() as tape:
-
-            while not terminated:
-                state = ops.convert_to_tensor(state)
-                state = ops.expand_dims(state, 0)
-                mu, var, critic_value = agent.get_action_probs(state)
-                action = agent.get_actions(mu, var)
-
-                next_state, reward, terminated, truncated, info = env.step(action)
-
-                critic_value_history.append(critic_value)
-                rewards_history.append(reward)
-                action_probs_history.append((mu, var, action))
-                episode_reward += reward
-
-                state = next_state
-
-            tf.summary.scalar("reward", data=episode_reward, step=episode)
-
-            print(f"Episode: {episode} Reward {episode_reward}")
-
-            returns = []
-            discounted_sum = 0
-
-            for r in rewards_history[::-1]:
-                discounted_sum = r + gamma * discounted_sum
-                returns.insert(0, discounted_sum)
-
-            # Normalize
-            returns = np.array(returns)
-            returns = (returns - np.mean(returns)) / (np.std(returns) + eps)
-            returns = returns.tolist()
-
-            history = zip(action_probs_history, critic_value_history, returns)
-            actor_losses = []
-            critic_losses = []
-
-            for (mu, var, action), value, ret in history:
-                log_prob = calc_logprob(mu, var, action)
-                diff = ret - value
-                actor_losses.append(-log_prob * diff)
-                critic_losses.append(
-                    huber_loss(ops.expand_dims(value, 0), ops.expand_dims(ret, 0))
-                )
-
-            # Backpropagation
-            loss_value = sum(actor_losses) + sum(critic_losses)
-
-            grads = tape.gradient(loss_value, agent.net.trainable_variables)
-            optimizer.apply_gradients(zip(grads, agent.net.trainable_variables))
-
-            # Clear the loss and reward history
-            action_probs_history.clear()
-            critic_value_history.clear()
-            rewards_history.clear()
+    
+    terminated = False
+    
+    env.reset()
+    
+    while (terminated == False):
+        action = np.random.random(gym_env.action_space.shape)
+        res = env.step(action)
+        
+        terminated = res.step_type == ts.StepType.LAST
 
     end_time = time.time()
     elapsed_time = end_time - start_time
 
     print(f"Elapsed time: {elapsed_time} seconds")
-    
-    if not os.path.exists(globals.MODEL_PATH):
-        os.makedirs(globals.MODEL_PATH)
 
-    agent.net.save(f"{globals.MODEL_PATH}/{n_episodes}.keras", overwrite=True)
-    
+    # if not os.path.exists(globals.MODEL_PATH):
+    #     os.makedirs(globals.MODEL_PATH)
+
     env.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    
-    parser.add_argument("--use-gui", action='store_true')
+
+    parser.add_argument("--use-gui", action="store_true")
     parser.add_argument("--episodes", type=int, default=10)
-    parser.add_argument("--prefix", type=str, default = os.path.dirname(os.path.abspath(__file__)))
+    parser.add_argument(
+        "--prefix", type=str, default=os.path.dirname(os.path.abspath(__file__))
+    )
     parser.add_argument("--episode-trigger-step", type=int, default=1000)
-    
+
     args = parser.parse_args()
-    
+
     print(args)
-    
-    globals.OUTPUT_PATH = os.path.join(args.prefix, 'output')
-    globals.MODEL_PATH = os.path.join(args.prefix, 'model')
+
+    globals.OUTPUT_PATH = os.path.join(args.prefix, "output")
+    globals.MODEL_PATH = os.path.join(args.prefix, "model")
     globals.USE_GUI = args.use_gui
     globals.EPISODES = args.episodes
     globals.EPISODE_TRIGGER_STEP = args.episode_trigger_step
-    
+
     file_writer = tf.summary.create_file_writer(globals.OUTPUT_PATH + "/tensorboard")
     file_writer.set_as_default()
-    
-    print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
- 
+
+    print("Num GPUs Available: ", len(tf.config.list_physical_devices("GPU")))
+
     train()
 
-    sys.exit(0)
+
+    # sys.exit(0)
