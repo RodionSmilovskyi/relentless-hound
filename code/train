@@ -15,9 +15,9 @@ from gym.wrappers import FrameStack
 from typing import Optional
 
 from tf_agents.environments.gym_wrapper import GymWrapper
-from env.drone_env import DroneEnv
-from env.cv_wrapper import CvWrapper
-from env.reward_wrapper import RewardWrapper
+from envs.drone_env import DroneEnv
+from envs.cv_wrapper import CvWrapper
+from envs.reward_wrapper import RewardWrapper
 from tf_agents.trajectories import time_step as ts
 
 os.environ['TF_USE_LEGACY_KERAS'] = '1'
