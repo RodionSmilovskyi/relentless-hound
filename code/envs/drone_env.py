@@ -5,6 +5,7 @@ import pybullet as p
 import pybullet_data
 from PIL import Image
 import globals
+from pybullet_utils import bullet_client as bc
 
 
 MAX_DISTANCE = 9999
@@ -44,18 +45,19 @@ class DroneEnv(gym.Env):
             dtype=np.float32,
         )
         self.render_mode = "rgb_array"
-        self._client = p.connect(p.GUI if useGUI == True else p.DIRECT)
+        self._client = bc.BulletClient(connection_mode=p.GUI if useGUI == True else p.DIRECT)
+        self._use_gui = useGUI
 
-        p.setAdditionalSearchPath(pybullet_data.getDataPath())
-        p.setGravity(0, 0, -9.8, physicsClientId=self._client)
+        self._client.setAdditionalSearchPath(pybullet_data.getDataPath())
+        self._client.setGravity(0, 0, -9.8)
 
         # for i in [
-        #     p.COV_ENABLE_RGB_BUFFER_PREVIEW,
-        #     p.COV_ENABLE_DEPTH_BUFFER_PREVIEW,
-        #     p.COV_ENABLE_SEGMENTATION_MARK_PREVIEW,
+        #     self._client.COV_ENABLE_RGB_BUFFER_PREVIEW,
+        #     self._client.COV_ENABLE_DEPTH_BUFFER_PREVIEW,
+        #     self._client.COV_ENABLE_SEGMENTATION_MARK_PREVIEW,
         # ]:
-        #     p.configureDebugVisualizer(
-        #         p.COV_ENABLE_RGB_BUFFER_PREVIEW, 1, physicsClientId=self._client
+        #     self._client.configureDebugVisualizer(
+        #         self._client.COV_ENABLE_RGB_BUFFER_PREVIEW, 1, physicsClientId=self._client
         #     )
 
     def step(self, action: ActType):
@@ -80,7 +82,7 @@ class DroneEnv(gym.Env):
         forces[2] = forces[2] + pitch
 
         for i in range(4):
-            p.applyExternalForce(
+            self._client.applyExternalForce(
                 self.drone_id,
                 i,
                 forceObj=[0, 0, forces[i] * MAX_MOTOR_THRUST],
@@ -88,14 +90,14 @@ class DroneEnv(gym.Env):
                 flags=p.LINK_FRAME,
             )
 
-        p.applyExternalTorque(
+        self._client.applyExternalTorque(
             self.drone_id,
             -1,  # Apply to the base
             torqueObj=[0, 0, 4 * yaw * MAX_MOTOR_THRUST],  # Y-axis torque
             flags=p.LINK_FRAME,
         )
 
-        p.stepSimulation()
+        self._client.stepSimulation()
 
         self._drone_img = self._get_drone_view()
         self._dist = self._get_distance_from_sensor()
@@ -109,10 +111,10 @@ class DroneEnv(gym.Env):
         return self._drone_img
 
     def close(self):
-        p.disconnect()
+        self._client.disconnect()
 
     def reset(self, seed: int = None, options: dict = None) -> ObsType:
-        p.resetSimulation()
+        self._client.resetSimulation()
 
         self._step_number = 0
         self._drone_img = np.zeros(self.observation_space["drone_img"].shape)
@@ -125,8 +127,8 @@ class DroneEnv(gym.Env):
         return empty_obs, {}
 
     def _scene_setup(self):
-        self.plane_id = p.loadURDF("plane.urdf")
-        self.drone_id = p.loadURDF(
+        self.plane_id = self._client.loadURDF("plane.urdf")
+        self.drone_id = self._client.loadURDF(
             f"{globals.WORKING_DIRECTORY}/drone.urdf", basePosition=[0, 0, 1]
         )
 
@@ -142,21 +144,21 @@ class DroneEnv(gym.Env):
             random_position = self.world_space.sample()
             self.initial_dist = np.linalg.norm(random_position - np.array([0, 0, 0]))
 
-        collisionShapeId = p.createCollisionShape(
-            shapeType=p.GEOM_MESH, fileName=f"{globals.WORKING_DIRECTORY}/a_cube.obj"
+        collisionShapeId = self._client.createCollisionShape(
+            shapeType=self._client.GEOM_MESH, fileName=f"{globals.WORKING_DIRECTORY}/a_cube.obj"
         )
-        visualShapeId = p.createVisualShape(
-            shapeType=p.GEOM_MESH, fileName=f"{globals.WORKING_DIRECTORY}/a_cube.obj"
+        visualShapeId = self._client.createVisualShape(
+            shapeType=self._client.GEOM_MESH, fileName=f"{globals.WORKING_DIRECTORY}/a_cube.obj"
         )
-        self.target_id = p.createMultiBody(
+        self.target_id = self._client.createMultiBody(
             baseCollisionShapeIndex=collisionShapeId,
             baseVisualShapeIndex=visualShapeId,
             basePosition=random_position.tolist(),
         )
 
     def _look_at(self, source_id, target_id):
-        source_pos, _ = p.getBasePositionAndOrientation(source_id)
-        target_pos, _ = p.getBasePositionAndOrientation(target_id)
+        source_pos, _ = self._client.getBasePositionAndOrientation(source_id)
+        target_pos, _ = self._client.getBasePositionAndOrientation(target_id)
         direction = np.array(target_pos) - np.array(source_pos)
         direction /= np.linalg.norm(direction)
 
@@ -165,23 +167,23 @@ class DroneEnv(gym.Env):
             -direction[2], np.sqrt(direction[0] ** 2 + direction[1] ** 2)
         )
         roll = np.arctan2(direction[1], direction[0])
-        quat = p.getQuaternionFromEuler([0, pitch, yaw])
-        p.resetBasePositionAndOrientation(source_id, source_pos, quat)
+        quat = self._client.getQuaternionFromEuler([0, pitch, yaw])
+        self._client.resetBasePositionAndOrientation(source_id, source_pos, quat)
 
     def _get_drone_view(self) -> np.array:
-        pos, orn = p.getBasePositionAndOrientation(self.drone_id)
-        rot_mat = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+        pos, orn = self._client.getBasePositionAndOrientation(self.drone_id)
+        rot_mat = np.array(self._client.getMatrixFromQuaternion(orn)).reshape(3, 3)
         target = np.dot(rot_mat, np.array([self.world_space.high[0], 0, 0])) + np.array(
             pos
         )
 
-        drone_cam_view = p.computeViewMatrix(
+        drone_cam_view = self._client.computeViewMatrix(
             cameraEyePosition=pos, cameraTargetPosition=target, cameraUpVector=[0, 0, 1]
         )
-        drone_cam_pro = p.computeProjectionMatrixFOV(
+        drone_cam_pro = self._client.computeProjectionMatrixFOV(
             fov=60.0, aspect=1.0, nearVal=0, farVal=np.max(self.world_space.high)
         )
-        [width, height, rgbImg, dep, seg] = p.getCameraImage(
+        [width, height, rgbImg, dep, seg] = self._client.getCameraImage(
             width=256,
             height=256,
             shadow=1,
@@ -195,10 +197,10 @@ class DroneEnv(gym.Env):
         return image[:, :, :3]
 
     def _get_distance_from_sensor(self) -> np.float32:
-        pos, orn = p.getBasePositionAndOrientation(self.drone_id)
-        rot_mat = p.getMatrixFromQuaternion(orn)
+        pos, orn = self._client.getBasePositionAndOrientation(self.drone_id)
+        rot_mat = self._client.getMatrixFromQuaternion(orn)
         drone_direction = np.array([rot_mat[0], rot_mat[3], rot_mat[6]]) * MAX_DISTANCE
-        ray_result = p.rayTest(pos, pos + drone_direction)
+        ray_result = self._client.rayTest(pos, pos + drone_direction)
         results = [
             hit[2] * MAX_DISTANCE for hit in ray_result if hit[0] == self.target_id
         ]
