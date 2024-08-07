@@ -1,8 +1,13 @@
 import os
 
 WORKING_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
+INPUT_PATH = ''
 OUTPUT_PATH = ''
 MODEL_PATH = ''
 USE_GUI = False
 EPISODES = 0
 EPISODE_TRIGGER_STEP = 1
+BATCH_SIZE = 0
+BUFFER_SIZE = 0
+LEARNING_RATE = 0.0
+NUMBER_OF_NEURONS = (32, 32)

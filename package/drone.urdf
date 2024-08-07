@@ -12,6 +12,11 @@
             <mesh filename="package://drone.stl" scale="1 1 1"/>
         </geometry>
     </visual>
+    <collision>
+        <geometry>
+            <box size="1 1 1.5"/>
+        </geometry>
+    </collision>
   </link>
 
   <!-- Propellers -->

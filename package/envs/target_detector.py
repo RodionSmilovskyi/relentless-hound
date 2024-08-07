@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from PIL import Image
-import globals
+import package.settings as settings
 
 BOX_REGRESSION_CHANNELS: int = 64
 IMG_WIDTH: int = 256
@@ -133,12 +133,12 @@ def non_max_suppression_multi_class(boxes, scores, classes, num_classes, iou_thr
 class TargetDetector:
 
     def __init__(self):
-        self.__interpreter = tf.lite.Interpreter(model_path=f"{globals.WORKING_DIRECTORY}/envs/model_256_256.tflite")
+        self.__interpreter = tf.lite.Interpreter(model_path=f"{settings.WORKING_DIRECTORY}/envs/model_256_256.tflite")
         self.__interpreter.allocate_tensors()
         self.__input_details = self.__interpreter.get_input_details()
         self.__output_details = self.__interpreter.get_output_details()
 
-        with open(f'{globals.WORKING_DIRECTORY}/classes.txt', 'r') as file:
+        with open(f'{settings.WORKING_DIRECTORY}/classes.txt', 'r') as file:
             self.__labels = file.readlines()
             self.__labels = [label.strip() for label in self.__labels]
 

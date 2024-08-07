@@ -2,15 +2,17 @@
 
 FROM tensorflow/tensorflow:2.15.0-gpu
 
-COPY code /opt/program
+COPY package /opt/package
 
 ENV PYTHONUNBUFFERED=TRUE
 
 ENV PYTHONDONTWRITEBYTECODE=TRUE
 
-ENV PATH="/opt/program:${PATH}"
+ENV PATH="/opt/package:${PATH}"
 
-WORKDIR /opt/program
+ENV PYTHONPATH="/opt"
+
+WORKDIR /opt/package
 
 RUN chmod a+x train 
 

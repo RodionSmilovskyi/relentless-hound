@@ -5,12 +5,22 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File",
+            "name": "Debug train",
             "type": "debugpy",
             "request": "launch",
-            "program": "code/train",
+            "program": "package/train",
             "console": "integratedTerminal",
-            "args": ["--use-gui", "--episode-trigger-step", "5", "--episodes", "10"]
+            "env": { "PYTHONPATH": "${workspaceFolder}" },
+            "args": ["--use-gui", "--episode-trigger-step", "5", "--episodes", "21"]
+        },
+        {
+            "name": "Debug avionics",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "test_drone",
+            "console": "integratedTerminal",
+            "env": { "PYTHONPATH": "${workspaceFolder}" },
+            "args": ["--use-gui", "--episode-trigger-step", "5", "--episodes", "11"]
         }
     ]
 }
