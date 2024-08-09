@@ -28,7 +28,6 @@ jobs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         audience: sts.amazonaws.com.cn
-        aws-region: ${{ secrets.AWS_REGION }}
         role-to-assume: arn:aws:iam::905418352696:role/GithubAccess
       
     - name: Login to Amazon ECR
