@@ -11,7 +11,7 @@ boto_session = boto3.Session(
 )
 sagemaker_session = sagemaker.Session(boto_session=boto_session)
 
-base_job_name = "sac-1000-new-physics-2"
+base_job_name = "default"
 
 
 date_str = datetime.now().strftime("%d-%m-%Y")
