@@ -364,5 +364,7 @@ if __name__ == "__main__":
     print("Num GPUs Available: ", len(tf.config.list_physical_devices("GPU")))
 
     train(len(tf.config.list_physical_devices("GPU")) > 0)
+    
+    print('SUCCESS')
 
     sys.exit(0)

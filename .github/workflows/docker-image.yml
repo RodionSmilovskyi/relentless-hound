@@ -36,6 +36,12 @@ jobs:
       run: |
           docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO_NAME }}:${{ env.BRANCH_NAME }} .
 
+    - name: Run test script
+      id: run_test
+      run: |
+          ./tain_local.sh  ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO_NAME }}:${{ env.BRANCH_NAME }}
+
+
     - name: Push Docker image to Amazon ECR
       run: |
           docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO_NAME }}:${{ env.BRANCH_NAME }}
