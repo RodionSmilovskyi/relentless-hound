@@ -28,7 +28,6 @@ if __name__ == "__main__":
     for i in range(EPISODES):
         state = env.reset()
 
-
         terminated: bool = False
 
         while not terminated:
@@ -44,7 +43,7 @@ if __name__ == "__main__":
 
             # new_state, reward, terminated, info = env.step(inference['action'][0])
             
-            action = np.array([1, 1, 1, 1])
+            action = np.array([1, 0, 0, 0])
             new_state, reward, terminated, info = env.step(action)
             
             state = new_state

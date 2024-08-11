@@ -1,8 +1,6 @@
 import gym
 from gym.core import ActType
 
-from package.envs.drone import MAX_DISTANCE
-
 DISTANCE_TO_TARGET = 0.5  # meters
 
 def is_target_at_the_center(bbox):
@@ -31,32 +29,10 @@ class RewardWrapper(gym.Wrapper):
 
         if len(not_empty_frames):
             last_frame = not_empty_frames[-1]
+           
+            center_reward = 1 if is_target_at_the_center(last_frame[0:4]) else 0
 
-            distance = round(last_frame[4], 4)
-
-            area = abs(last_frame[0] - last_frame[2]) * abs(
-                last_frame[1] - last_frame[3]
-            )
-
-            area_reward = 0
-
-            if area > self.prev_area:
-                area_reward = 1
-            if area < self.prev_area:
-                area_reward = -1
-
-            self.prev_area = area
-
-            end_reward = (
-                50
-                if is_target_at_the_center(last_frame[0:4])
-                and distance <= DISTANCE_TO_TARGET / MAX_DISTANCE
-                else 0
-            )
-
-            reward = reward + area_reward + end_reward
-
-            terminated = terminated or end_reward != 0
+            reward = reward + center_reward
 
             return frames, reward, terminated, info
 
