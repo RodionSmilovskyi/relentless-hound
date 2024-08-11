@@ -148,15 +148,13 @@ class DroneEnv(gym.Env):
 
         self.step_number = self.step_number + 1
 
-        time_penalty = -1
-
         low_altitude_penalty = (
             -10
             if altitude < MIN_ALTITUDE / MAX_ALTITUDE and self.step_number > 50
             else 0
         )
 
-        reward = time_penalty + low_altitude_penalty
+        reward = low_altitude_penalty
 
         return (
             {

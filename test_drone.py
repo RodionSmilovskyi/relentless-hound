@@ -45,6 +45,7 @@ if __name__ == "__main__":
             
             action = np.array([1, 0, 0, 0])
             new_state, reward, terminated, info = env.step(action)
+            print(f'Reward {reward}')
             
             state = new_state
 
