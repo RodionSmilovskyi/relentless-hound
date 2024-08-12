@@ -250,7 +250,7 @@ def train(use_gpu):
 
     learning_triggers = [
         triggers.PolicySavedModelTrigger(
-            saved_model_dir, tf_agent, train_step, interval=policy_save_interval
+            saved_model_dir, tf_agent, train_step, interval=policy_save_interval, metadata_metrics={triggers.ENV_STEP_METADATA_KEY: env_step_metric},
         ),
         triggers.StepPerSecondLogTrigger(train_step, interval=100),
     ]
