@@ -294,13 +294,13 @@ def train(use_gpu):
             log_eval_metrics(step, metrics)
             train_checkpointer.save(step)
             print(
-                "step = {0}: average return = {1}".format(
+                "episode = {0}: average return = {1}".format(
                     step, metrics["AverageReturn"]
                 )
             )
 
         if log_interval and step % log_interval == 0:
-            print("step = {0}: loss = {1}".format(step, loss_info.loss.numpy()))
+            print("episode = {0}: loss = {1}".format(step, loss_info.loss.numpy()))
 
     rb_observer.close()
     reverb_server.stop()
