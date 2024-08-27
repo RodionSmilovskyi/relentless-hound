@@ -27,7 +27,7 @@ tensorboard_output_config = TensorBoardOutputConfig(
 
 estimator = Estimator(
     sagemaker_session=sagemaker_session,
-    image_uri="905418352696.dkr.ecr.us-east-1.amazonaws.com/ai-repo:hover.0c252a7",
+    image_uri="905418352696.dkr.ecr.us-east-1.amazonaws.com/ai-repo:hover.592c16b",
     role=role,
     max_run=24 * 60 * 60,
     base_job_name=base_job_name,
