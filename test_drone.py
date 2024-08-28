@@ -32,19 +32,20 @@ if __name__ == "__main__":
 
         while not terminated:
             
-            inference = policy_runner(
-                **{
-                    "0/discount": tf.constant(0.0),
-                    "0/observation": tf.cast(tf.constant(state), tf.float32),
-                    "0/reward": tf.constant(0.0),
-                    "0/step_type": tf.constant(0),
-                }
-            )
+            # inference = policy_runner(
+            #     **{
+            #         "0/discount": tf.constant(0.0),
+            #         "0/observation": tf.cast(tf.constant(state), tf.float32),
+            #         "0/reward": tf.constant(0.0),
+            #         "0/step_type": tf.constant(0),
+            #     }
+            # )
 
-            new_state, reward, terminated, info = env.step(inference['action'][0])
+            # new_state, reward, terminated, info = env.step(inference['action'][0])
             
-            # action = np.array([1, 0, 0, 0])
-            # new_state, reward, terminated, info = env.step(action)
+            action = np.array([0, 10, 10, 10])
+            # action = env.action_space.sample()
+            new_state, reward, terminated, info = env.step(action)
             print(f'Reward {reward}')
             
             state = new_state
