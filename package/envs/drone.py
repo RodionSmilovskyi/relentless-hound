@@ -15,7 +15,7 @@ MAX_DISTANCE = 40  # meters
 MAX_ALTITUDE = 121  # meters
 MIN_ALTITUDE = 1  # meters
 FRAME_NUMBER = 500
-THRUST_TO_WEIGHT_RATIO = 2
+THRUST_TO_WEIGHT_RATIO = 4
 DRONE_WEIGHT = 1
 G = 9.81
 
@@ -148,15 +148,13 @@ class DroneEnv(gym.Env):
 
         self.step_number = self.step_number + 1
 
-        time_penalty = -1
-
         low_altitude_penalty = (
-            -50
+            -10
             if altitude < MIN_ALTITUDE / MAX_ALTITUDE and self.step_number > 50
             else 0
         )
 
-        reward = time_penalty + low_altitude_penalty
+        reward = low_altitude_penalty
 
         return (
             {

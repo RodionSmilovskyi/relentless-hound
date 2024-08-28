@@ -250,7 +250,7 @@ def train(use_gpu):
 
     learning_triggers = [
         triggers.PolicySavedModelTrigger(
-            saved_model_dir, tf_agent, train_step, interval=policy_save_interval
+            saved_model_dir, tf_agent, train_step, interval=policy_save_interval, metadata_metrics={triggers.ENV_STEP_METADATA_KEY: env_step_metric},
         ),
         triggers.StepPerSecondLogTrigger(train_step, interval=100),
     ]
@@ -294,13 +294,13 @@ def train(use_gpu):
             log_eval_metrics(step, metrics)
             train_checkpointer.save(step)
             print(
-                "step = {0}: average return = {1}".format(
+                "episode = {0}: average return = {1}".format(
                     step, metrics["AverageReturn"]
                 )
             )
 
         if log_interval and step % log_interval == 0:
-            print("step = {0}: loss = {1}".format(step, loss_info.loss.numpy()))
+            print("episode = {0}: loss = {1}".format(step, loss_info.loss.numpy()))
 
     rb_observer.close()
     reverb_server.stop()

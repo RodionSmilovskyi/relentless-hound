@@ -1,12 +1,14 @@
 # syntax=docker/dockerfile:1
 
-FROM tensorflow/tensorflow:2.15.0-gpu
+FROM 763104351884.dkr.ecr.us-east-1.amazonaws.com/tensorflow-training:2.14.1-gpu-py310-cu118-ubuntu20.04-ec2
 
 COPY package /opt/package
 
 ENV PYTHONUNBUFFERED=TRUE
 
 ENV PYTHONDONTWRITEBYTECODE=TRUE
+
+ENV WRAPT_DISABLE_EXTENSIONS=TRUE
 
 ENV PATH="/opt/package:${PATH}"
 
