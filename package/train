@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#pylint: skip-file
+# pylint: skip-file
 
 import os
 import sys
@@ -7,14 +7,10 @@ import settings
 import numpy as np
 import gym
 import argparse
-import random
 import time
 import datetime
 import tensorflow as tf
-import imageio
-import io
 
-from gym.spaces import Discrete, Box
 from gym.wrappers import FrameStack, RecordVideo
 from typing import Optional
 
@@ -23,128 +19,88 @@ from envs.cv_wrapper import CvWrapper
 from envs.reward_wrapper import RewardWrapper
 
 import reverb
-import tempfile
+
 from tf_agents.environments.gym_wrapper import GymWrapper
-from tf_agents.agents.ddpg import critic_network
-from tf_agents.agents.sac import sac_agent
-from tf_agents.agents.sac import tanh_normal_projection_network
-from tf_agents.environments import suite_pybullet
-from tf_agents.metrics import py_metrics
+from tf_agents.agents.reinforce import reinforce_agent
+from tf_agents.drivers import py_driver
+from tf_agents.environments import tf_py_environment
 from tf_agents.networks import actor_distribution_network
-from tf_agents.policies import greedy_policy
 from tf_agents.policies import py_tf_eager_policy
-from tf_agents.policies import random_py_policy
+from tf_agents.policies import policy_saver
 from tf_agents.replay_buffers import reverb_replay_buffer
 from tf_agents.replay_buffers import reverb_utils
-from tf_agents.train import actor
-from tf_agents.train import learner
-from tf_agents.train import triggers
-from tf_agents.train.utils import spec_utils
-from tf_agents.train.utils import strategy_utils
-from tf_agents.train.utils import train_utils
+from tf_agents.specs import tensor_spec
+from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
 
-target_update_tau = 0.005  # @param {type:"number"}
-target_update_period = 1  # @param {type:"number"}
-gamma = 0.99  # @param {type:"number"}
-reward_scale_factor = 1.0  # @param {type:"number"}
-
-log_interval = 1  # @param {type:"integer"}
 num_eval_episodes = 10  # @param {type:"integer"}
-policy_save_interval = 1  # @param {type:"integer"}
-
-tempdir = tempfile.gettempdir()
+collect_episodes_per_iteration = 2
 
 
-def run_episodes_and_create_video(policy, eval_py_env):
-    movie_path = f"{settings.OUTPUT_PATH}/data"
-    num_episodes = 1
-    frames = []
-
-    if not os.path.exists(movie_path):
-        os.makedirs(movie_path)
+def compute_avg_return(environment, policy, num_episodes=10):
+    total_return = 0.0
 
     for _ in range(num_episodes):
-        time_step = eval_py_env.reset()
-        frames.append(eval_py_env.render())
+        time_step = environment.reset()
+        episode_return = 0.0
+
         while not time_step.is_last():
             action_step = policy.action(time_step)
-            time_step = eval_py_env.step(action_step.action)
-            frames.append(eval_py_env.render())
+            time_step = environment.step(action_step.action)
+            episode_return += time_step.reward
+        total_return += episode_return
 
-    imageio.mimsave(
-        os.path.join(f"{settings.OUTPUT_PATH}/data", "test"),
-        frames,
-        format="gif",
-        fps=60,
+    avg_return = total_return / num_episodes
+    return avg_return.numpy()[0]
+
+
+def collect_episode(environment, policy, rb_observer, num_episodes):
+
+    driver = py_driver.PyDriver(
+        environment,
+        py_tf_eager_policy.PyTFEagerPolicy(policy, use_tf_function=True),
+        [rb_observer],
+        max_episodes=num_episodes,
     )
 
-
-def episode_trigger_fn(episode_number):
-    if episode_number == 0 or episode_number == settings.EPISODES - 1:
-        return True
-    else:
-        return (episode_number + 1) % settings.EPISODE_TRIGGER_STEP == 0
-
-
-def create_agent(env, strategy):
-    observation_spec, action_spec, time_step_spec = spec_utils.get_tensor_specs(env)
-
-    with strategy.scope():
-        critic_net = critic_network.CriticNetwork(
-            (observation_spec, action_spec),
-            observation_fc_layer_params=None,
-            action_fc_layer_params=None,
-            joint_fc_layer_params=settings.NUMBER_OF_NEURONS,
-            kernel_initializer="glorot_uniform",
-            last_kernel_initializer="glorot_uniform",
-        )
-
-    with strategy.scope():
-        actor_net = actor_distribution_network.ActorDistributionNetwork(
-            observation_spec,
-            action_spec,
-            fc_layer_params=settings.NUMBER_OF_NEURONS,
-            continuous_projection_net=(
-                tanh_normal_projection_network.TanhNormalProjectionNetwork
-            ),
-        )
-
-    with strategy.scope():
-        train_step = train_utils.create_train_step()
-
-        tf_agent = sac_agent.SacAgent(
-            time_step_spec,
-            action_spec,
-            actor_network=actor_net,
-            critic_network=critic_net,
-            actor_optimizer=tf.keras.optimizers.Adam(learning_rate=settings.LEARNING_RATE),
-            critic_optimizer=tf.keras.optimizers.Adam(
-                learning_rate=settings.LEARNING_RATE
-            ),
-            alpha_optimizer=tf.keras.optimizers.Adam(learning_rate=settings.LEARNING_RATE),
-            target_update_tau=target_update_tau,
-            target_update_period=target_update_period,
-            td_errors_loss_fn=tf.math.squared_difference,
-            gamma=gamma,
-            reward_scale_factor=reward_scale_factor,
-            train_step_counter=train_step,
-            debug_summaries=True,
-            summarize_grads_and_vars=True,
-        )
-
-    tf_agent.initialize()
-
-    return tf_agent, train_step
+    initial_time_step = environment.reset()
+    driver.run(initial_time_step)
 
 
 def train(use_gpu):
-    collect_env = GymWrapper(RewardWrapper(FrameStack(CvWrapper(DroneEnv(False)), 4)))
+    train_py_env = GymWrapper(RewardWrapper(FrameStack(CvWrapper(DroneEnv(False)), 4)))
+    train_env = tf_py_environment.TFPyEnvironment(train_py_env)
+    train_step_counter = tf.Variable(0, dtype=tf.int64)
 
-    strategy = strategy_utils.get_strategy(tpu=False, use_gpu=use_gpu)
+    eval_py_env = GymWrapper(
+        RecordVideo(
+            RewardWrapper(FrameStack(CvWrapper(DroneEnv(settings.USE_GUI)), 4)),
+            f"{settings.OUTPUT_PATH}/data/videos",
+            episode_trigger=lambda ep_id: ep_id % num_eval_episodes == 0,
+            name_prefix=f'{datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}-validation-{train_step_counter.numpy()}',
+        )
+    )
+    eval_env = tf_py_environment.TFPyEnvironment(eval_py_env)
 
-    tf_agent, train_step = create_agent(collect_env, strategy)
+    actor_net = actor_distribution_network.ActorDistributionNetwork(
+        train_env.observation_spec(), train_env.action_spec()
+    )
 
+    optimizer = tf.keras.optimizers.Adam(learning_rate=settings.LEARNING_RATE)
+
+    tf_agent = reinforce_agent.ReinforceAgent(
+        train_env.time_step_spec(),
+        train_env.action_spec(),
+        actor_network=actor_net,
+        optimizer=optimizer,
+        normalize_returns=True,
+        train_step_counter=train_step_counter,
+    )
+
+    tf_agent.initialize()
+
+    replay_buffer_signature = tensor_spec.from_spec(tf_agent.collect_data_spec)
+    replay_buffer_signature = tensor_spec.add_outer_dim(replay_buffer_signature)
     table_name = "uniform_table"
     table = reverb.Table(
         table_name,
@@ -152,155 +108,57 @@ def train(use_gpu):
         sampler=reverb.selectors.Uniform(),
         remover=reverb.selectors.Fifo(),
         rate_limiter=reverb.rate_limiters.MinSize(1),
+        signature=replay_buffer_signature,
     )
 
     reverb_server = reverb.Server([table])
 
     replay_buffer = reverb_replay_buffer.ReverbReplayBuffer(
         tf_agent.collect_data_spec,
-        sequence_length=tf_agent.train_sequence_length,
         table_name=table_name,
+        sequence_length=None,
         local_server=reverb_server,
     )
 
-    train_checkpointer = common.Checkpointer(
-        ckpt_dir=os.path.join(settings.OUTPUT_PATH + "/data", "checkpoint"),
-        max_to_keep=1,
-        agent=tf_agent,
-        policy=tf_agent.policy,
-        replay_buffer=replay_buffer,
-        global_step=train_step,
+    rb_observer = reverb_utils.ReverbAddEpisodeObserver(
+        replay_buffer.py_client, table_name, settings.BUFFER_SIZE
     )
 
-    train_checkpointer.initialize_or_restore()
+    tf_agent.train = common.function(tf_agent.train)
+    tf_agent.train_step_counter.assign(0)
+    avg_return = compute_avg_return(eval_env, tf_agent.policy, num_eval_episodes)
 
-    rb_observer = reverb_utils.ReverbAddTrajectoryObserver(
-        replay_buffer.py_client,
-        table_name,
-        sequence_length=tf_agent.train_sequence_length,
-        stride_length=1,
-    )
+    tf.summary.scalar("Average Return", data=avg_return, step=tf_agent.train_step_counter.numpy())
 
-    tf_eval_policy = tf_agent.policy
-    eval_policy = py_tf_eager_policy.PyTFEagerPolicy(
-        tf_eval_policy, use_tf_function=True
-    )
-
-    tf_collect_policy = tf_agent.collect_policy
-    collect_policy = py_tf_eager_policy.PyTFEagerPolicy(
-        tf_collect_policy, use_tf_function=True
-    )
-
-    if train_checkpointer.checkpoint_exists == False:
-        random_policy = random_py_policy.RandomPyPolicy(
-            collect_env.time_step_spec(), collect_env.action_spec()
-        )
-
-        initial_collect_actor = actor.Actor(
-            collect_env,
-            random_policy,
-            train_step,
-            steps_per_run=settings.BUFFER_SIZE,
-            observers=[rb_observer],
-        )
-
-        initial_collect_actor.run()
+    tf_policy_saver = policy_saver.PolicySaver(tf_agent.policy)
+    policy_dir = os.path.join(settings.OUTPUT_PATH, "policy")
 
     start_time = time.time()
 
-    dataset = replay_buffer.as_dataset(
-        sample_batch_size=settings.BATCH_SIZE, num_steps=tf_agent.train_sequence_length
-    ).prefetch(50)
-
-    experience_dataset_fn = lambda: dataset
-
-    env_step_metric = py_metrics.EnvironmentSteps()
-
-    collect_actor = actor.Actor(
-        collect_env,
-        collect_policy,
-        train_step,
-        episodes_per_run=1,
-        metrics=actor.collect_metrics(10),
-        summary_dir=os.path.join(
-            settings.OUTPUT_PATH + "/tensorboard", learner.TRAIN_DIR
-        ),
-        observers=[rb_observer, env_step_metric],
-    )
-
-    eval_env = GymWrapper(
-        RecordVideo(
-            RewardWrapper(FrameStack(CvWrapper(DroneEnv(settings.USE_GUI)), 4)),
-            f"{settings.OUTPUT_PATH}/data/videos",
-            episode_trigger=lambda ep_id: ep_id % num_eval_episodes == 0,
-            name_prefix=datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"),
-        )
-    )
-
-    eval_actor = actor.Actor(
-        eval_env,
-        eval_policy,
-        train_step,
-        episodes_per_run=num_eval_episodes,
-        metrics=actor.eval_metrics(num_eval_episodes),
-        summary_dir=os.path.join(settings.OUTPUT_PATH + "/tensorboard", "eval"),
-    )
-
-    saved_model_dir = os.path.join(settings.OUTPUT_PATH, learner.POLICY_SAVED_MODEL_DIR)
-
-    learning_triggers = [
-        triggers.PolicySavedModelTrigger(
-            saved_model_dir, tf_agent, train_step, interval=policy_save_interval, metadata_metrics={triggers.ENV_STEP_METADATA_KEY: env_step_metric},
-        ),
-        triggers.StepPerSecondLogTrigger(train_step, interval=100),
-    ]
-
-    agent_learner = learner.Learner(
-        tempdir,
-        train_step,
-        tf_agent,
-        experience_dataset_fn,
-        triggers=learning_triggers,
-        strategy=strategy,
-    )
-
-    def get_eval_metrics():
-        eval_actor.run()
-        results = {}
-        for metric in eval_actor.metrics:
-            results[metric.name] = metric.result()
-        return results
-
-    def log_eval_metrics(step, metrics):
-        for name, result in metrics.items():
-            tf.summary.scalar(name, data=result, step=step)
-
-    tf_agent.train_step_counter.assign(0)
-
-    client = reverb.Client(f"localhost:{reverb_server.port}")
-
-    # print(list(client.sample('uniform_table', num_samples=1)))
-
     for _ in range(settings.EPISODES):
-        # Training.
-        collect_actor.run()
-        loss_info = agent_learner.run(iterations=1)
+        collect_episode(
+            train_py_env,
+            tf_agent.collect_policy,
+            rb_observer,
+            collect_episodes_per_iteration,
+        )
 
-        # Evaluating.
-        step = agent_learner.train_step_numpy
+        iterator = iter(replay_buffer.as_dataset(sample_batch_size=1))
+        trajectories, _ = next(iterator)
+        train_loss = tf_agent.train(experience=trajectories)
 
-        if settings.EPISODE_TRIGGER_STEP and step % settings.EPISODE_TRIGGER_STEP == 0:
-            metrics = get_eval_metrics()
-            log_eval_metrics(step, metrics)
-            train_checkpointer.save(step)
-            print(
-                "episode = {0}: average return = {1}".format(
-                    step, metrics["AverageReturn"]
-                )
+        replay_buffer.clear()
+        step = tf_agent.train_step_counter.numpy()
+
+        print("step = {0}: loss = {1}".format(step, train_loss.loss))
+
+        if step % settings.EPISODE_TRIGGER_STEP == 0:
+            avg_return = compute_avg_return(
+                eval_env, tf_agent.policy, num_eval_episodes
             )
-
-        if log_interval and step % log_interval == 0:
-            print("episode = {0}: loss = {1}".format(step, loss_info.loss.numpy()))
+            tf.summary.scalar("Average Return", data=avg_return, step=step)
+            print("step = {0}: Average Return = {1}".format(step, avg_return))
+            tf_policy_saver.save(policy_dir)
 
     rb_observer.close()
     reverb_server.stop()
@@ -309,9 +167,10 @@ def train(use_gpu):
         os.makedirs(settings.MODEL_PATH)
 
     converter = tf.lite.TFLiteConverter.from_saved_model(
-        os.path.join(saved_model_dir, "policy"), signature_keys=["action"]
+        policy_dir, signature_keys=["action"]
     )
     tflite_policy = converter.convert()
+
     with open(os.path.join(settings.MODEL_PATH, "policy.tflite"), "wb") as f:
         f.write(tflite_policy)
 
@@ -346,7 +205,7 @@ if __name__ == "__main__":
     settings.EPISODES = args.episodes
     settings.EPISODE_TRIGGER_STEP = args.episode_trigger_step
     settings.BATCH_SIZE = args.batch_size
-    settings.NUMBER_OF_NEURONS = (args.neurons, args.neurons)
+    settings.NUMBER_OF_NEURONS = (args.neurons,)
     settings.BUFFER_SIZE = args.buffer_size
     settings.LEARNING_RATE = args.learning_rate
 
@@ -364,7 +223,7 @@ if __name__ == "__main__":
     print("Num GPUs Available: ", len(tf.config.list_physical_devices("GPU")))
 
     train(len(tf.config.list_physical_devices("GPU")) > 0)
-    
-    print('SUCCESS')
+
+    print("SUCCESS")
 
     sys.exit(0)

@@ -21,7 +21,7 @@ if __name__ == "__main__":
     )
 
     interpreter = tf.lite.Interpreter(
-        os.path.join(settings.WORKING_DIRECTORY, "envs", "policy.tflite")
+        os.path.join(settings.WORKING_DIRECTORY, "model", "policy.tflite")
     )
     policy_runner = interpreter.get_signature_runner()
 
@@ -31,23 +31,23 @@ if __name__ == "__main__":
         terminated: bool = False
 
         while not terminated:
-            
-            # inference = policy_runner(
-            #     **{
-            #         "0/discount": tf.constant(0.0),
-            #         "0/observation": tf.cast(tf.constant(state), tf.float32),
-            #         "0/reward": tf.constant(0.0),
-            #         "0/step_type": tf.constant(0),
-            #     }
-            # )
 
-            # new_state, reward, terminated, info = env.step(inference['action'][0])
-            
-            action = np.array([0, 10, 10, 10])
+            inference = policy_runner(
+                **{
+                    "0/discount": tf.constant(0.0),
+                    "0/observation": tf.cast(tf.constant(state), tf.float32),
+                    "0/reward": tf.constant(0.0),
+                    "0/step_type": tf.constant(0),
+                }
+            )
+
+            new_state, reward, terminated, info = env.step(inference['action'][0])
+
+            # action = np.array([10, 0, 20, 10])
             # action = env.action_space.sample()
-            new_state, reward, terminated, info = env.step(action)
-            print(f'Reward {reward}')
-            
+            # new_state, reward, terminated, info = env.step(action)
+            print(f"Reward {reward}")
+
             state = new_state
 
     env.close()

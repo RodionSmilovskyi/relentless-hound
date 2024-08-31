@@ -62,9 +62,7 @@ class DroneEnv(gym.Env):
             }
         )
 
-        self.action_space: ActType = gym.spaces.MultiDiscrete(
-            np.array([10, 20, 20, 20])
-        )
+        self.action_space: ActType = gym.spaces.MultiDiscrete(np.array([11, 11, 11, 11]))
 
         self.drone_img = np.zeros(self.observation_space["drone_img"].shape)
 
@@ -174,9 +172,9 @@ class DroneEnv(gym.Env):
     def _apply_physics(self, action: ActType):
         max_motor_thrust = round(DRONE_WEIGHT * THRUST_TO_WEIGHT_RATIO * G / 4, 2)
         thrust = round(convert_range(action[0], 0, 10, 0, 1), 2)
-        roll = round(convert_range(action[1], 0, 20, -1, 1), 2)
-        pitch = round(convert_range(action[2], 0, 20, -1, 1), 2)
-        yaw = round(convert_range(action[3], 0, 20, -1, 1), 2)
+        roll = round(convert_range(action[1], 0, 10, -1, 1), 2)
+        pitch = round(convert_range(action[2], 0, 10, -1, 1), 2)
+        yaw = round(convert_range(action[3], 0, 10, -1, 1), 2)
 
         forces = [max_motor_thrust * thrust for i in range(4)]
 
