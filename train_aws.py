@@ -11,7 +11,7 @@ boto_session = boto3.Session(
 )
 sagemaker_session = sagemaker.Session(boto_session=boto_session)
 
-base_job_name = "hover-128-128-10000-5000"
+base_job_name = "reinforce"
 
 
 date_str = datetime.now().strftime("%d-%m-%Y")
@@ -27,7 +27,7 @@ tensorboard_output_config = TensorBoardOutputConfig(
 
 estimator = Estimator(
     sagemaker_session=sagemaker_session,
-    image_uri="905418352696.dkr.ecr.us-east-1.amazonaws.com/ai-repo:hover.592c16b",
+    image_uri="905418352696.dkr.ecr.us-east-1.amazonaws.com/ai-repo:reinforce_discrete.4e6148d",
     role=role,
     max_run=24 * 60 * 60,
     base_job_name=base_job_name,
@@ -35,15 +35,15 @@ estimator = Estimator(
     container_arguments=[
         "train",
         "--episodes",
-        "5001",
+        "11",
         "--episode-trigger-step",
-        "100",
+        "5",
         "--neurons",
         "128",
         "--batch-size",
         "128",
         "--buffer-size",
-        "10000",
+        "250",
         "--prefix",
         "/opt/ml",
     ],

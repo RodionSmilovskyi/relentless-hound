@@ -11,7 +11,7 @@
             "program": "package/train",
             "console": "integratedTerminal",
             "env": { "PYTHONPATH": "${workspaceFolder}", "WRAPT_DISABLE_EXTENSIONS": "true" },
-            "args": ["--episode-trigger-step", "5", "--episodes", "11"]
+            "args": ["--use-gui", "--episode-trigger-step", "1", "--episodes", "2"]
         },
         {
             "name": "Debug avionics",

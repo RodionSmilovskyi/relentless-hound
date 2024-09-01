@@ -159,7 +159,7 @@ class DroneEnv(gym.Env):
                 "altitude": altitude,
             },
             reward,
-            self.step_number == FRAME_NUMBER or low_altitude_penalty != 0,
+            self.step_number == FRAME_NUMBER - 1 or low_altitude_penalty != 0,
             {},
         )
 

@@ -14,7 +14,7 @@ import tensorflow as tf
 from gym.wrappers import FrameStack, RecordVideo
 from typing import Optional
 
-from envs.drone import DroneEnv
+from envs.drone import FRAME_NUMBER, DroneEnv
 from envs.cv_wrapper import CvWrapper
 from envs.reward_wrapper import RewardWrapper
 
@@ -32,9 +32,10 @@ from tf_agents.replay_buffers import reverb_utils
 from tf_agents.specs import tensor_spec
 from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
+from tf_agents.train.utils import strategy_utils
 
 num_eval_episodes = 10  # @param {type:"integer"}
-collect_episodes_per_iteration = 2
+collect_episodes_per_iteration = 5
 
 
 def compute_avg_return(environment, policy, num_episodes=10):
@@ -77,7 +78,7 @@ def train(use_gpu):
             RewardWrapper(FrameStack(CvWrapper(DroneEnv(settings.USE_GUI)), 4)),
             f"{settings.OUTPUT_PATH}/data/videos",
             episode_trigger=lambda ep_id: ep_id % num_eval_episodes == 0,
-            name_prefix=f'{datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}-validation-{train_step_counter.numpy()}',
+            name_prefix=f'validation-{train_step_counter.numpy()}',
         )
     )
     eval_env = tf_py_environment.TFPyEnvironment(eval_py_env)
@@ -121,7 +122,7 @@ def train(use_gpu):
     )
 
     rb_observer = reverb_utils.ReverbAddEpisodeObserver(
-        replay_buffer.py_client, table_name, settings.BUFFER_SIZE
+        replay_buffer.py_client, table_name, FRAME_NUMBER
     )
 
     tf_agent.train = common.function(tf_agent.train)
