@@ -34,8 +34,8 @@ from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
 from tf_agents.train.utils import strategy_utils
 
-num_eval_episodes = 5  # @param {type:"integer"}
-collect_episodes_per_iteration = 10
+num_eval_episodes = 2  # @param {type:"integer"}
+collect_episodes_per_iteration = 5
 
 
 def compute_avg_return(environment, policy, num_episodes=10):
@@ -130,6 +130,9 @@ def train(use_gpu):
         replay_buffer=replay_buffer
     )
     train_checkpointer.initialize_or_restore()
+    tf_policy_saver = policy_saver.PolicySaver(tf_agent.policy)
+    policy_dir = os.path.join(settings.OUTPUT_PATH, "policy")
+
 
     # rb_observer = reverb_utils.ReverbAddEpisodeObserver(
     #     replay_buffer.py_client, table_name, FRAME_NUMBER
@@ -175,11 +178,12 @@ def train(use_gpu):
             tf.summary.scalar("Average Return", data=avg_return, step=step)
             print("step = {0}: Average Return = {1}".format(step, avg_return))
             train_checkpointer.save(train_step_counter)
+            tf_policy_saver.save(policy_dir)
+
 
     rb_observer.close()
     reverb_server.stop()
-
-    policy_dir = os.path.join(settings.OUTPUT_PATH, "policy")
+  
     if not os.path.exists(settings.MODEL_PATH):
         os.makedirs(settings.MODEL_PATH)
 
