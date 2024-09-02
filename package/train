@@ -34,8 +34,8 @@ from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
 from tf_agents.train.utils import strategy_utils
 
-num_eval_episodes = 2  # @param {type:"integer"}
-collect_episodes_per_iteration = 5
+num_eval_episodes = 5  # @param {type:"integer"}
+collect_episodes_per_iteration = 10
 
 
 def compute_avg_return(environment, policy, num_episodes=10):
