@@ -22,5 +22,9 @@ RUN pip install -r docker_requirements.txt
 
 RUN rm -rf output
 
+RUN rm -rf checkpoints
+
+RUN rm -rf model
+
 RUN rm -rf __pycache__
 
