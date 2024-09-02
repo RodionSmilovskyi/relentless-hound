@@ -34,7 +34,7 @@ from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
 from tf_agents.train.utils import strategy_utils
 
-num_eval_episodes = 10  # @param {type:"integer"}
+num_eval_episodes = 2  # @param {type:"integer"}
 collect_episodes_per_iteration = 5
 
 
@@ -84,7 +84,8 @@ def train(use_gpu):
     eval_env = tf_py_environment.TFPyEnvironment(eval_py_env)
 
     actor_net = actor_distribution_network.ActorDistributionNetwork(
-        train_env.observation_spec(), train_env.action_spec()
+        train_env.observation_spec(), train_env.action_spec(),
+        fc_layer_params=settings.FC_LAYER_PARAMS
     )
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=settings.LEARNING_RATE)
@@ -121,8 +122,12 @@ def train(use_gpu):
         local_server=reverb_server,
     )
 
-    rb_observer = reverb_utils.ReverbAddEpisodeObserver(
-        replay_buffer.py_client, table_name, FRAME_NUMBER
+    # rb_observer = reverb_utils.ReverbAddEpisodeObserver(
+    #     replay_buffer.py_client, table_name, FRAME_NUMBER
+    # )
+    
+    rb_observer = reverb_utils.ReverbAddTrajectoryObserver(
+        replay_buffer.py_client, table_name, FRAME_NUMBER, pad_end_of_episodes=True
     )
 
     tf_agent.train = common.function(tf_agent.train)
@@ -133,7 +138,6 @@ def train(use_gpu):
 
     tf_policy_saver = policy_saver.PolicySaver(tf_agent.policy)
     policy_dir = os.path.join(settings.OUTPUT_PATH, "policy")
-
     start_time = time.time()
 
     for _ in range(settings.EPISODES):
@@ -144,11 +148,12 @@ def train(use_gpu):
             collect_episodes_per_iteration,
         )
 
-        iterator = iter(replay_buffer.as_dataset(sample_batch_size=1))
+        iterator = iter(replay_buffer.as_dataset(sample_batch_size=collect_episodes_per_iteration))
         trajectories, _ = next(iterator)
         train_loss = tf_agent.train(experience=trajectories)
 
         replay_buffer.clear()
+        
         step = tf_agent.train_step_counter.numpy()
 
         print("step = {0}: loss = {1}".format(step, train_loss.loss))
@@ -180,6 +185,9 @@ def train(use_gpu):
 
     print(f"Elapsed time: {elapsed_time} seconds")
 
+def parse_tuple(s):
+    parts = s.split('-')
+    return tuple(map(int, parts))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -191,7 +199,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--episode-trigger-step", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--neurons", type=int, default=32)
+    parser.add_argument("--fc-layer-params", type=parse_tuple, default=(100, ))
     parser.add_argument("--buffer-size", type=int, default=1000)
     parser.add_argument("--learning-rate", type=float, default=0.001)
 
@@ -199,14 +207,14 @@ if __name__ == "__main__":
 
     print(args)
 
-    settings.INPUT_PATH = os.path.join(args.prefix, "input", "data", "training")
+    settings.INPUT_PATH = os.path.join(args.prefix, "input", "data")
     settings.OUTPUT_PATH = os.path.join(args.prefix, "output")
     settings.MODEL_PATH = os.path.join(args.prefix, "model")
     settings.USE_GUI = args.use_gui
     settings.EPISODES = args.episodes
     settings.EPISODE_TRIGGER_STEP = args.episode_trigger_step
     settings.BATCH_SIZE = args.batch_size
-    settings.NUMBER_OF_NEURONS = (args.neurons,)
+    settings.FC_LAYER_PARAMS = args.fc_layer_params
     settings.BUFFER_SIZE = args.buffer_size
     settings.LEARNING_RATE = args.learning_rate
 
