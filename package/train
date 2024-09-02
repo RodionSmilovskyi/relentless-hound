@@ -78,14 +78,15 @@ def train(use_gpu):
             RewardWrapper(FrameStack(CvWrapper(DroneEnv(settings.USE_GUI)), 4)),
             f"{settings.OUTPUT_PATH}/data/videos",
             episode_trigger=lambda ep_id: ep_id % num_eval_episodes == 0,
-            name_prefix=f'validation-{train_step_counter.numpy()}',
+            name_prefix=f"validation-{train_step_counter.numpy()}",
         )
     )
     eval_env = tf_py_environment.TFPyEnvironment(eval_py_env)
 
     actor_net = actor_distribution_network.ActorDistributionNetwork(
-        train_env.observation_spec(), train_env.action_spec(),
-        fc_layer_params=settings.FC_LAYER_PARAMS
+        train_env.observation_spec(),
+        train_env.action_spec(),
+        fc_layer_params=settings.FC_LAYER_PARAMS,
     )
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=settings.LEARNING_RATE)
@@ -122,10 +123,18 @@ def train(use_gpu):
         local_server=reverb_server,
     )
 
+    train_checkpointer = common.Checkpointer(
+        ckpt_dir=settings.CHECKPOINT_PATH,
+        max_to_keep=1,
+        tf_agent=tf_agent,
+        replay_buffer=replay_buffer
+    )
+    train_checkpointer.initialize_or_restore()
+
     # rb_observer = reverb_utils.ReverbAddEpisodeObserver(
     #     replay_buffer.py_client, table_name, FRAME_NUMBER
     # )
-    
+
     rb_observer = reverb_utils.ReverbAddTrajectoryObserver(
         replay_buffer.py_client, table_name, FRAME_NUMBER, pad_end_of_episodes=True
     )
@@ -134,10 +143,10 @@ def train(use_gpu):
     tf_agent.train_step_counter.assign(0)
     avg_return = compute_avg_return(eval_env, tf_agent.policy, num_eval_episodes)
 
-    tf.summary.scalar("Average Return", data=avg_return, step=tf_agent.train_step_counter.numpy())
+    tf.summary.scalar(
+        "Average Return", data=avg_return, step=tf_agent.train_step_counter.numpy()
+    )
 
-    tf_policy_saver = policy_saver.PolicySaver(tf_agent.policy)
-    policy_dir = os.path.join(settings.OUTPUT_PATH, "policy")
     start_time = time.time()
 
     for _ in range(settings.EPISODES):
@@ -148,14 +157,15 @@ def train(use_gpu):
             collect_episodes_per_iteration,
         )
 
-        iterator = iter(replay_buffer.as_dataset(sample_batch_size=collect_episodes_per_iteration))
+        iterator = iter(
+            replay_buffer.as_dataset(sample_batch_size=collect_episodes_per_iteration)
+        )
         trajectories, _ = next(iterator)
         train_loss = tf_agent.train(experience=trajectories)
 
         replay_buffer.clear()
-        
-        step = tf_agent.train_step_counter.numpy()
 
+        step = tf_agent.train_step_counter.numpy()
         print("step = {0}: loss = {1}".format(step, train_loss.loss))
 
         if step % settings.EPISODE_TRIGGER_STEP == 0:
@@ -164,11 +174,12 @@ def train(use_gpu):
             )
             tf.summary.scalar("Average Return", data=avg_return, step=step)
             print("step = {0}: Average Return = {1}".format(step, avg_return))
-            tf_policy_saver.save(policy_dir)
+            train_checkpointer.save(train_step_counter)
 
     rb_observer.close()
     reverb_server.stop()
 
+    policy_dir = os.path.join(settings.OUTPUT_PATH, "policy")
     if not os.path.exists(settings.MODEL_PATH):
         os.makedirs(settings.MODEL_PATH)
 
@@ -185,9 +196,11 @@ def train(use_gpu):
 
     print(f"Elapsed time: {elapsed_time} seconds")
 
+
 def parse_tuple(s):
-    parts = s.split('-')
+    parts = s.split("-")
     return tuple(map(int, parts))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -199,7 +212,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--episode-trigger-step", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--fc-layer-params", type=parse_tuple, default=(100, ))
+    parser.add_argument("--fc-layer-params", type=parse_tuple, default=(100,))
     parser.add_argument("--buffer-size", type=int, default=1000)
     parser.add_argument("--learning-rate", type=float, default=0.001)
 
@@ -210,6 +223,7 @@ if __name__ == "__main__":
     settings.INPUT_PATH = os.path.join(args.prefix, "input", "data")
     settings.OUTPUT_PATH = os.path.join(args.prefix, "output")
     settings.MODEL_PATH = os.path.join(args.prefix, "model")
+    settings.CHECKPOINT_PATH = os.path.join(args.prefix, "checkpoints")
     settings.USE_GUI = args.use_gui
     settings.EPISODES = args.episodes
     settings.EPISODE_TRIGGER_STEP = args.episode_trigger_step
@@ -218,10 +232,11 @@ if __name__ == "__main__":
     settings.BUFFER_SIZE = args.buffer_size
     settings.LEARNING_RATE = args.learning_rate
 
-    file_writer = tf.summary.create_file_writer(
-        settings.OUTPUT_PATH + "/tensorboard/misc"
+    train_file_writer = tf.summary.create_file_writer(
+        settings.OUTPUT_PATH + "/tensorboard/train",
+        flush_millis=1000
     )
-    file_writer.set_as_default()
+    train_file_writer.set_as_default()
 
     # tf.debugging.experimental.enable_dump_debug_info(
     #     settings.OUTPUT_PATH + "/tensorboard",
