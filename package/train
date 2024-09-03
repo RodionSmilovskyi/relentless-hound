@@ -22,6 +22,8 @@ import reverb
 
 from tf_agents.environments.gym_wrapper import GymWrapper
 from tf_agents.agents.reinforce import reinforce_agent
+from tf_agents.metrics import tf_metrics
+from tf_agents.eval import metric_utils
 from tf_agents.drivers import py_driver
 from tf_agents.environments import tf_py_environment
 from tf_agents.networks import actor_distribution_network
@@ -33,6 +35,7 @@ from tf_agents.specs import tensor_spec
 from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
 from tf_agents.train.utils import strategy_utils
+
 
 def compute_avg_return(environment, policy, num_episodes=10):
     total_return = 0.0
@@ -51,12 +54,12 @@ def compute_avg_return(environment, policy, num_episodes=10):
     return avg_return.numpy()[0]
 
 
-def collect_episode(environment, policy, rb_observer, num_episodes):
+def collect_episode(environment, policy, observers, num_episodes):
 
     driver = py_driver.PyDriver(
         environment,
         py_tf_eager_policy.PyTFEagerPolicy(policy, use_tf_function=True),
-        [rb_observer],
+        observers,
         max_episodes=num_episodes,
     )
 
@@ -78,6 +81,9 @@ def train(use_gpu):
         )
     )
     eval_env = tf_py_environment.TFPyEnvironment(eval_py_env)
+    eval_summary_writer = tf.compat.v2.summary.create_file_writer(
+        settings.OUTPUT_PATH + "/tensorboard/eval", flush_millis=1000
+    )
 
     actor_net = actor_distribution_network.ActorDistributionNetwork(
         train_env.observation_spec(),
@@ -97,6 +103,11 @@ def train(use_gpu):
     )
 
     tf_agent.initialize()
+
+    eval_metrics = [
+        tf_metrics.AverageReturnMetric(buffer_size=settings.NUM_EVAL_EPISODES),
+        tf_metrics.AverageEpisodeLengthMetric(buffer_size=settings.NUM_EVAL_EPISODES),
+    ]
 
     replay_buffer_signature = tensor_spec.from_spec(tf_agent.collect_data_spec)
     replay_buffer_signature = tensor_spec.add_outer_dim(replay_buffer_signature)
@@ -123,12 +134,11 @@ def train(use_gpu):
         ckpt_dir=settings.CHECKPOINT_PATH,
         max_to_keep=1,
         tf_agent=tf_agent,
-        replay_buffer=replay_buffer
+        replay_buffer=replay_buffer,
     )
     train_checkpointer.initialize_or_restore()
     tf_policy_saver = policy_saver.PolicySaver(tf_agent.policy)
     policy_dir = os.path.join(settings.OUTPUT_PATH, "policy")
-
 
     # rb_observer = reverb_utils.ReverbAddEpisodeObserver(
     #     replay_buffer.py_client, table_name, FRAME_NUMBER
@@ -140,10 +150,16 @@ def train(use_gpu):
 
     tf_agent.train = common.function(tf_agent.train)
     tf_agent.train_step_counter.assign(0)
-    avg_return = compute_avg_return(eval_env, tf_agent.policy, settings.NUM_EVAL_EPISODES)
+    # avg_return = compute_avg_return(eval_env, tf_agent.policy, settings.NUM_EVAL_EPISODES)
 
-    tf.summary.scalar(
-        "Average Return", data=avg_return, step=tf_agent.train_step_counter.numpy()
+    metric_utils.eager_compute(
+        eval_metrics,
+        eval_env,
+        tf_agent.policy,
+        num_episodes=settings.NUM_EVAL_EPISODES,
+        train_step=train_step_counter,
+        summary_writer=eval_summary_writer,
+        summary_prefix="Metrics",
     )
 
     start_time = time.time()
@@ -152,12 +168,16 @@ def train(use_gpu):
         collect_episode(
             train_py_env,
             tf_agent.collect_policy,
-            rb_observer,
+            [
+                rb_observer
+            ],
             settings.COLLECT_EPISODES_PER_ITERATION,
         )
 
         iterator = iter(
-            replay_buffer.as_dataset(sample_batch_size=settings.COLLECT_EPISODES_PER_ITERATION)
+            replay_buffer.as_dataset(
+                sample_batch_size=settings.COLLECT_EPISODES_PER_ITERATION
+            )
         )
         trajectories, _ = next(iterator)
         train_loss = tf_agent.train(experience=trajectories)
@@ -168,18 +188,28 @@ def train(use_gpu):
         print("step = {0}: loss = {1}".format(step, train_loss.loss))
 
         if step % settings.VALIDATION_EPSIODE == 0:
-            avg_return = compute_avg_return(
-                eval_env, tf_agent.policy, settings.NUM_EVAL_EPISODES
+            metrics = metric_utils.eager_compute(
+                eval_metrics,
+                eval_env,
+                tf_agent.policy,
+                num_episodes=settings.NUM_EVAL_EPISODES,
+                train_step=train_step_counter,
+                summary_writer=eval_summary_writer,
+                summary_prefix="Metrics",
             )
-            tf.summary.scalar("Average Return", data=avg_return, step=step)
-            print("step = {0}: Average Return = {1}".format(step, avg_return))
+
+            print(
+                "step = {0}: Average Return = {1}, Average Episode Length {2}".format(
+                    step, metrics["AverageReturn"], metrics["AverageEpisodeLength"]
+                )
+            )
+
             train_checkpointer.save(train_step_counter)
             tf_policy_saver.save(policy_dir)
 
-
     rb_observer.close()
     reverb_server.stop()
-  
+
     if not os.path.exists(settings.MODEL_PATH):
         os.makedirs(settings.MODEL_PATH)
 
@@ -206,12 +236,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--use-gui", action="store_true")
-    parser.add_argument("--prefix", type=str, default=os.path.dirname(os.path.abspath(__file__)))
+    parser.add_argument(
+        "--prefix", type=str, default=os.path.dirname(os.path.abspath(__file__))
+    )
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--validation-episode", type=int, default=5)
     parser.add_argument("--num-eval-episodes", type=int, default=5)
     parser.add_argument("--collect-episodes-per-iteration", type=int, default=10)
-    parser.add_argument("--fc-layer-params", type=parse_tuple, default=(100,100))
+    parser.add_argument("--fc-layer-params", type=parse_tuple, default=(100, 100))
     parser.add_argument("--buffer-size", type=int, default=1000)
     parser.add_argument("--learning-rate", type=float, default=0.001)
 
@@ -233,8 +265,7 @@ if __name__ == "__main__":
     settings.LEARNING_RATE = args.learning_rate
 
     train_file_writer = tf.summary.create_file_writer(
-        settings.OUTPUT_PATH + "/tensorboard/train",
-        flush_millis=1000
+        settings.OUTPUT_PATH + "/tensorboard/train", flush_millis=1000
     )
     train_file_writer.set_as_default()
 
