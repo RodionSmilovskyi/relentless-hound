@@ -143,6 +143,8 @@ venv.bak/
 /test_dir
 
 /package/output
+/package/checkpoints
+
 
 # mypy
 .mypy_cache/
