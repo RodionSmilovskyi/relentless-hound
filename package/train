@@ -18,13 +18,13 @@ from envs.drone import FRAME_NUMBER, DroneEnv
 from envs.cv_wrapper import CvWrapper
 from envs.reward_wrapper import RewardWrapper
 
-import reverb
-
+from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.environments.gym_wrapper import GymWrapper
 from tf_agents.agents.reinforce import reinforce_agent
 from tf_agents.metrics import tf_metrics
 from tf_agents.eval import metric_utils
 from tf_agents.drivers import py_driver
+from tf_agents.drivers import dynamic_episode_driver
 from tf_agents.environments import tf_py_environment
 from tf_agents.networks import actor_distribution_network, value_network
 from tf_agents.policies import py_tf_eager_policy
@@ -55,12 +55,11 @@ def compute_avg_return(environment, policy, num_episodes=10):
 
 
 def collect_episode(environment, policy, observers, num_episodes):
-
-    driver = py_driver.PyDriver(
+    driver = dynamic_episode_driver.DynamicEpisodeDriver(
         environment,
-        py_tf_eager_policy.PyTFEagerPolicy(policy, use_tf_function=True),
-        observers,
-        max_episodes=num_episodes,
+        policy,
+        observers=observers,
+        num_episodes=num_episodes,
     )
 
     initial_time_step = environment.reset()
@@ -90,7 +89,7 @@ def train(use_gpu):
         train_env.action_spec(),
         fc_layer_params=settings.FC_LAYER_PARAMS,
     )
-    
+
     value_net = value_network.ValueNetwork(
         train_env.observation_spec(),
         fc_layer_params=settings.FC_LAYER_PARAMS,
@@ -107,6 +106,7 @@ def train(use_gpu):
         normalize_returns=True,
         use_advantage_loss=True,
         train_step_counter=train_step_counter,
+        entropy_regularization=settings.ENTROPY_RATE
     )
 
     tf_agent.initialize()
@@ -116,27 +116,12 @@ def train(use_gpu):
         tf_metrics.AverageEpisodeLengthMetric(buffer_size=settings.NUM_EVAL_EPISODES),
     ]
 
-    replay_buffer_signature = tensor_spec.from_spec(tf_agent.collect_data_spec)
-    replay_buffer_signature = tensor_spec.add_outer_dim(replay_buffer_signature)
-    table_name = "uniform_table"
-    table = reverb.Table(
-        table_name,
-        max_size=settings.BUFFER_SIZE,
-        sampler=reverb.selectors.Uniform(),
-        remover=reverb.selectors.Fifo(),
-        rate_limiter=reverb.rate_limiters.MinSize(1),
-        signature=replay_buffer_signature,
-    )
-
-    reverb_server = reverb.Server([table])
-
-    replay_buffer = reverb_replay_buffer.ReverbReplayBuffer(
+    replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
         tf_agent.collect_data_spec,
-        table_name=table_name,
-        sequence_length=None,
-        local_server=reverb_server,
+        batch_size=train_env.batch_size,
+        max_length=settings.BUFFER_SIZE,
     )
-
+    
     train_checkpointer = common.Checkpointer(
         ckpt_dir=settings.CHECKPOINT_PATH,
         max_to_keep=1,
@@ -144,20 +129,15 @@ def train(use_gpu):
         replay_buffer=replay_buffer,
     )
     train_checkpointer.initialize_or_restore()
+
+    if train_checkpointer.checkpoint_exists == True:
+        print("Checkpoint uploaded")
+
     tf_policy_saver = policy_saver.PolicySaver(tf_agent.policy)
     policy_dir = os.path.join(settings.OUTPUT_PATH, "policy")
 
-    # rb_observer = reverb_utils.ReverbAddEpisodeObserver(
-    #     replay_buffer.py_client, table_name, FRAME_NUMBER
-    # )
-
-    rb_observer = reverb_utils.ReverbAddTrajectoryObserver(
-        replay_buffer.py_client, table_name, FRAME_NUMBER, pad_end_of_episodes=True
-    )
-
     tf_agent.train = common.function(tf_agent.train)
     tf_agent.train_step_counter.assign(0)
-    # avg_return = compute_avg_return(eval_env, tf_agent.policy, settings.NUM_EVAL_EPISODES)
 
     metric_utils.eager_compute(
         eval_metrics,
@@ -173,20 +153,17 @@ def train(use_gpu):
 
     for _ in range(settings.EPISODES):
         collect_episode(
-            train_py_env,
+            train_env,
             tf_agent.collect_policy,
             [
-                rb_observer
+                replay_buffer.add_batch,
+                tf_metrics.AverageReturnMetric(),
+                tf_metrics.AverageEpisodeLengthMetric(),
             ],
             settings.COLLECT_EPISODES_PER_ITERATION,
         )
 
-        iterator = iter(
-            replay_buffer.as_dataset(
-                sample_batch_size=settings.COLLECT_EPISODES_PER_ITERATION
-            )
-        )
-        trajectories, _ = next(iterator)
+        trajectories = replay_buffer.gather_all()
         train_loss = tf_agent.train(experience=trajectories)
 
         replay_buffer.clear()
@@ -214,8 +191,6 @@ def train(use_gpu):
             train_checkpointer.save(train_step_counter)
             tf_policy_saver.save(policy_dir)
 
-    rb_observer.close()
-    reverb_server.stop()
 
     if not os.path.exists(settings.MODEL_PATH):
         os.makedirs(settings.MODEL_PATH)
@@ -248,11 +223,11 @@ if __name__ == "__main__":
     )
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--validation-episode", type=int, default=5)
-    parser.add_argument("--num-eval-episodes", type=int, default=5)
     parser.add_argument("--collect-episodes-per-iteration", type=int, default=10)
     parser.add_argument("--fc-layer-params", type=parse_tuple, default=(100, 100))
     parser.add_argument("--buffer-size", type=int, default=1000)
     parser.add_argument("--learning-rate", type=float, default=0.001)
+    parser.add_argument("--entropy-rate", type=float)
 
     args = parser.parse_args()
 
@@ -264,12 +239,12 @@ if __name__ == "__main__":
     settings.CHECKPOINT_PATH = os.path.join(args.prefix, "checkpoints")
     settings.USE_GUI = args.use_gui
     settings.EPISODES = args.episodes
-    settings.NUM_EVAL_EPISODES = args.num_eval_episodes
     settings.COLLECT_EPISODES_PER_ITERATION = args.collect_episodes_per_iteration
     settings.VALIDATION_EPSIODE = args.validation_episode
     settings.FC_LAYER_PARAMS = args.fc_layer_params
     settings.BUFFER_SIZE = args.buffer_size
     settings.LEARNING_RATE = args.learning_rate
+    settings.ENTROPY_RATE = args.entropy_rate
 
     train_file_writer = tf.summary.create_file_writer(
         settings.OUTPUT_PATH + "/tensorboard/train", flush_millis=1000
