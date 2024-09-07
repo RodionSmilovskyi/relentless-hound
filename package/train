@@ -16,7 +16,7 @@ from typing import Optional
 
 from envs.drone import FRAME_NUMBER, DroneEnv
 from envs.cv_wrapper import CvWrapper
-from envs.reward_wrapper import RewardWrapper
+from envs.hover_reward_wrapper import HowerRewardWrapper as RewardWrapper
 
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.environments.gym_wrapper import GymWrapper
@@ -67,13 +67,13 @@ def collect_episode(environment, policy, observers, num_episodes):
 
 
 def train(use_gpu):
-    train_py_env = GymWrapper(RewardWrapper(FrameStack(CvWrapper(DroneEnv(False)), 4)))
+    train_py_env = GymWrapper(RewardWrapper(CvWrapper(DroneEnv(False))))
     train_env = tf_py_environment.TFPyEnvironment(train_py_env)
     train_step_counter = tf.Variable(0, dtype=tf.int64)
 
     eval_py_env = GymWrapper(
         RecordVideo(
-            RewardWrapper(FrameStack(CvWrapper(DroneEnv(settings.USE_GUI)), 4)),
+            RewardWrapper(CvWrapper(DroneEnv(settings.USE_GUI))),
             f"{settings.OUTPUT_PATH}/data/videos",
             episode_trigger=lambda ep_id: ep_id % settings.NUM_EVAL_EPISODES == 0,
             name_prefix=f"validation-{train_step_counter.numpy()}",
@@ -119,7 +119,7 @@ def train(use_gpu):
     replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
         tf_agent.collect_data_spec,
         batch_size=train_env.batch_size,
-        max_length=settings.BUFFER_SIZE,
+        max_length=FRAME_NUMBER,
     )
     
     train_checkpointer = common.Checkpointer(

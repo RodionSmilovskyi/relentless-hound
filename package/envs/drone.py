@@ -12,7 +12,7 @@ DRONE_IMG_WIDTH = 256
 DRONE_IMG_HEIGHT = 256
 NUMBER_OF_CHANNELS = 3
 MAX_DISTANCE = 40  # meters
-MAX_ALTITUDE = 121  # meters
+MAX_ALTITUDE = 10  # meters
 MIN_ALTITUDE = 1  # meters
 FRAME_NUMBER = 500
 THRUST_TO_WEIGHT_RATIO = 4
@@ -46,7 +46,7 @@ class DroneEnv(gym.Env):
         self._agent_location = np.array([0, 0, 0], dtype=np.int32)
 
         self.world_space = gym.spaces.Box(
-            low=np.array([-20, -20, 0]), high=np.array([20, 20, 10]), dtype=np.float32
+            low=np.array([-20, -20, 0]), high=np.array([20, 20, MAX_ALTITUDE]), dtype=np.float32
         )
 
         self.observation_space: ObsType = gym.spaces.Dict(
@@ -144,23 +144,15 @@ class DroneEnv(gym.Env):
 
         self.step_number = self.step_number + 1
 
-        low_altitude_penalty = (
-            -10
-            if altitude < MIN_ALTITUDE / MAX_ALTITUDE and self.step_number > 50
-            else 0
-        )
-
-        reward = low_altitude_penalty
-
         return (
             {
                 "drone_img": self.drone_img,
                 "distance": distance,
                 "altitude": altitude,
             },
-            reward,
-            self.step_number == FRAME_NUMBER - 1 or low_altitude_penalty != 0,
-            {},
+            0,
+            self.step_number == FRAME_NUMBER - 1,
+            {"step_number": self.step_number},
         )
 
     def render(self, mode="human"):

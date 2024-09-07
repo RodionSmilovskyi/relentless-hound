@@ -27,6 +27,8 @@ class CvWrapper(gym.ObservationWrapper):
 
         self.altitude = 0
 
+        self.step_number = 0
+
     def observation(self, observation) -> ObsType:
         drone_observation = (
             observation[0] if isinstance(observation, tuple) else observation
