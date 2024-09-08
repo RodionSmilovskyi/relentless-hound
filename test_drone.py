@@ -20,10 +20,10 @@ if __name__ == "__main__":
         name_prefix=datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"),
     )
 
-    # interpreter = tf.lite.Interpreter(
-    #     os.path.join(settings.WORKING_DIRECTORY, "model", "policy.tflite")
-    # )
-    # policy_runner = interpreter.get_signature_runner()
+    interpreter = tf.lite.Interpreter(
+        os.path.join(settings.WORKING_DIRECTORY, "model", "policy.tflite")
+    )
+    policy_runner = interpreter.get_signature_runner()
 
     for i in range(EPISODES):
         state = env.reset()
@@ -32,20 +32,20 @@ if __name__ == "__main__":
 
         while not terminated:
 
-            # inference = policy_runner(
-            #     **{
-            #         "0/discount": tf.constant(0.0),
-            #         "0/observation": tf.cast(tf.constant(state), tf.float32),
-            #         "0/reward": tf.constant(0.0),
-            #         "0/step_type": tf.constant(0),
-            #     }
-            # )
+            inference = policy_runner(
+                **{
+                    "0/discount": tf.constant(0.0),
+                    "0/observation": tf.cast(tf.constant(state), tf.float32),
+                    "0/reward": tf.constant(0.0),
+                    "0/step_type": tf.constant(0),
+                }
+            )
 
-            # new_state, reward, terminated, info = env.step(inference['action'][0])
+            new_state, reward, terminated, info = env.step(inference['action'][0])
 
-            action = np.array([10, 0, 20, 10])
-            action = env.action_space.sample()
-            new_state, reward, terminated, info = env.step(action)
+            # action = np.array([10, 0, 20, 10])
+            # action = env.action_space.sample()
+            # new_state, reward, terminated, info = env.step(action)
             print(f"step {info['step_number']} reward {reward}")
 
             state = new_state

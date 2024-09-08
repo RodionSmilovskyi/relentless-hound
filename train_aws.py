@@ -5,7 +5,7 @@ from sagemaker.estimator import Estimator
 from sagemaker.debugger import TensorBoardOutputConfig
 
 ROLE = "arn:aws:iam::905418352696:role/SageMakerFullAccess"
-BASE_JOB_NAME = "reinforce-hover-2"
+BASE_JOB_NAME = "reinforce-hover-3"
 
 boto_session = boto3.Session(
     profile_name="905418352696_AdministratorAccess", region_name="us-east-1"
@@ -21,7 +21,7 @@ tensorboard_output_config = TensorBoardOutputConfig(
 
 estimator = Estimator(
     sagemaker_session=sagemaker_session,
-    image_uri="905418352696.dkr.ecr.us-east-1.amazonaws.com/ai-repo:reinforce_discrete.ae0ab33",
+    image_uri="905418352696.dkr.ecr.us-east-1.amazonaws.com/ai-repo:reinforce_discrete.532122f",
     role=ROLE,
     max_run=24 * 60 * 60,
     base_job_name=BASE_JOB_NAME,
@@ -30,17 +30,17 @@ estimator = Estimator(
     container_arguments=[
         "train",
         "--episodes",
-        "200",
+        "100",
         "--collect-episodes-per-iteration",
-        "10",
+        "20",
         "--validation-episode",
+        "10",
+        "--num-eval-episodes",
         "5",
         "--buffer-size",
         "100",
         "--learning-rate",
         "0.001",
-        "--entropy-rate",
-        "0.1",
         "--prefix",
         "/opt/ml",
     ],

@@ -95,7 +95,8 @@ def train(use_gpu):
         normalize_returns=True,
         use_advantage_loss=True,
         train_step_counter=train_step_counter,
-        entropy_regularization=settings.ENTROPY_RATE
+        entropy_regularization=settings.ENTROPY_RATE,
+        debug_summaries=True
     )
 
     tf_agent.initialize()
