@@ -10,8 +10,22 @@
             "request": "launch",
             "program": "package/train",
             "console": "integratedTerminal",
-            "env": { "PYTHONPATH": "${workspaceFolder}", "WRAPT_DISABLE_EXTENSIONS": "true" },
-            "args": ["--validation-episode", "2", "--episodes", "2", "--collect-episodes-per-iteration", "5"]
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "WRAPT_DISABLE_EXTENSIONS": "true"
+            },
+            "args": [
+                "--validation_episode",
+                "2",
+                "--episodes",
+                "3",
+                "--collect_episodes_per_iteration",
+                "2",
+                "--num_eval_episodes",
+                "1",
+                "--number_of_parallel_envs",
+                "2"
+            ]
         },
         {
             "name": "Debug avionics",
@@ -19,8 +33,16 @@
             "request": "launch",
             "module": "test_drone",
             "console": "integratedTerminal",
-            "env": { "PYTHONPATH": "${workspaceFolder}" },
-            "args": ["--use-gui", "--validation-episode", "1", "--episodes", "5"]
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "args": [
+                "--use_gui",
+                "--validation_episode",
+                "1",
+                "--episodes",
+                "5"
+            ]
         }
     ]
 }

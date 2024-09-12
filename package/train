@@ -6,8 +6,11 @@ import sys
 import settings
 import argparse
 import time
+import functools
 import tensorflow as tf
 
+from absl import app
+from absl import flags
 from gym.wrappers import RecordVideo
 from envs.drone import FRAME_NUMBER, DroneEnv
 from envs.cv_wrapper import CvWrapper
@@ -15,33 +18,24 @@ from envs.hover_reward_wrapper import HowerRewardWrapper as RewardWrapper
 
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.environments.gym_wrapper import GymWrapper
-from tf_agents.agents.reinforce import reinforce_agent
+from tf_agents.agents.ppo import ppo_clip_agent
 from tf_agents.metrics import tf_metrics
 from tf_agents.eval import metric_utils
 from tf_agents.drivers import dynamic_episode_driver
+from tf_agents.environments import parallel_py_environment
 from tf_agents.environments import tf_py_environment
 from tf_agents.networks import actor_distribution_network, value_network
 from tf_agents.policies import policy_saver
 from tf_agents.utils import common
+from tf_agents.system import system_multiprocessing as multiprocessing
 
+class ParallelTrainingEnv(GymWrapper):
+    def __init__(self):
+        super().__init__(RewardWrapper(CvWrapper(DroneEnv(False))))
 
-
-def compute_avg_return(environment, policy, num_episodes=10):
-    total_return = 0.0
-
-    for _ in range(num_episodes):
-        time_step = environment.reset()
-        episode_return = 0.0
-
-        while not time_step.is_last():
-            action_step = policy.action(time_step)
-            time_step = environment.step(action_step.action)
-            episode_return += time_step.reward
-        total_return += episode_return
-
-    avg_return = total_return / num_episodes
-    return avg_return.numpy()[0]
-
+def parse_tuple(s):
+    parts = s.split("-")
+    return tuple(map(int, parts))
 
 def collect_episode(environment, policy, observers, num_episodes):
     driver = dynamic_episode_driver.DynamicEpisodeDriver(
@@ -53,12 +47,53 @@ def collect_episode(environment, policy, observers, num_episodes):
 
     initial_time_step = environment.reset()
     driver.run(initial_time_step)
+    
+def print_settings():
+    attributes = dir(settings)
+    constants = [attr for attr in attributes if attr.isupper()]
+
+    for constant in constants:
+        print(f"{constant}: {getattr(settings, constant)}")
+
+flags.DEFINE_boolean("use_gui", False, "use gui")
+flags.DEFINE_string("prefix", os.path.dirname(os.path.abspath(__file__)), "main path")
+flags.DEFINE_integer("number_of_parallel_envs", 5, "number of parallel envs")
+flags.DEFINE_integer("validation_episode", 5, "validation episode")
+flags.DEFINE_integer("num_eval_episodes", 30, "number of evaluation episodes")
+flags.DEFINE_integer("episodes", 10, "number of episodes")
+flags.DEFINE_integer("buffer_size", 1000, "buffer capacity per env")
+flags.DEFINE_float("learning_rate", 0.001, "Learning rate")
+flags.DEFINE_integer(
+    "collect_episodes_per_iteration", 10, "collect-episodes-per-iteration"
+)
+flags.DEFINE_string('fc_layer_params', "50-50", 'Fully connected layers parameters')
 
 
-def train(use_gpu):
-    train_py_env = GymWrapper(RewardWrapper(CvWrapper(DroneEnv(False))))
-    train_env = tf_py_environment.TFPyEnvironment(train_py_env)
+def train(_):
+    settings.INPUT_PATH = os.path.join(flags.FLAGS.prefix, "input", "data")
+    settings.OUTPUT_PATH = os.path.join(flags.FLAGS.prefix, "output")
+    settings.MODEL_PATH = os.path.join(flags.FLAGS.prefix, "model")
+    settings.CHECKPOINT_PATH = os.path.join(flags.FLAGS.prefix, "checkpoints")
+    settings.USE_GUI = flags.FLAGS.use_gui
+    settings.EPISODES = flags.FLAGS.episodes
+    settings.NUM_EVAL_EPISODES = flags.FLAGS.num_eval_episodes
+    settings.NUM_PARALLEL_ENV = flags.FLAGS.number_of_parallel_envs
+    settings.VALIDATION_EPISODE = flags.FLAGS.validation_episode
+    settings.COLLECT_EPISODES_PER_ITERATION = flags.FLAGS.collect_episodes_per_iteration
+    settings.LEARNING_RATE = flags.FLAGS.learning_rate
+    settings.FC_LAYER_PARAMS = parse_tuple(flags.FLAGS.fc_layer_params)
+    
+    print_settings()
+
     train_step_counter = tf.Variable(0, dtype=tf.int64)
+
+    train_env = tf_py_environment.TFPyEnvironment(
+        parallel_py_environment.ParallelPyEnvironment([ParallelTrainingEnv] * settings.NUM_PARALLEL_ENV)
+    )
+    train_file_writer = tf.summary.create_file_writer(
+        settings.OUTPUT_PATH + "/tensorboard/train", flush_millis=1000
+    )
+    train_file_writer.set_as_default()
 
     eval_py_env = GymWrapper(
         RecordVideo(
@@ -77,29 +112,45 @@ def train(use_gpu):
         train_env.observation_spec(),
         train_env.action_spec(),
         fc_layer_params=settings.FC_LAYER_PARAMS,
+        activation_fn=tf.keras.activations.tanh,
     )
-
     value_net = value_network.ValueNetwork(
         train_env.observation_spec(),
         fc_layer_params=settings.FC_LAYER_PARAMS,
+        activation_fn=tf.keras.activations.tanh,
     )
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=settings.LEARNING_RATE)
 
-    tf_agent = reinforce_agent.ReinforceAgent(
+    tf_agent = ppo_clip_agent.PPOClipAgent(
         train_env.time_step_spec(),
         train_env.action_spec(),
-        actor_network=actor_net,
-        value_network=value_net,
-        optimizer=optimizer,
-        normalize_returns=True,
-        use_advantage_loss=True,
+        optimizer,
+        actor_net=actor_net,
+        value_net=value_net,
+        entropy_regularization=0.0,
+        importance_ratio_clipping=0.2,
+        normalize_observations=False,
+        normalize_rewards=False,
+        use_gae=True,
+        num_epochs=25,
         train_step_counter=train_step_counter,
-        entropy_regularization=settings.ENTROPY_RATE,
-        debug_summaries=True
     )
 
     tf_agent.initialize()
+
+    environment_steps_metric = tf_metrics.EnvironmentSteps()
+    step_metrics = [
+        tf_metrics.NumberOfEpisodes(),
+        environment_steps_metric,
+    ]
+    train_metrics = step_metrics + [
+        tf_metrics.AverageReturnMetric(batch_size=settings.NUM_PARALLEL_ENV),
+        tf_metrics.AverageEpisodeLengthMetric(batch_size=settings.NUM_PARALLEL_ENV),
+    ]
+
+    eval_policy = tf_agent.policy
+    collect_policy = tf_agent.collect_policy
 
     eval_metrics = [
         tf_metrics.AverageReturnMetric(buffer_size=settings.NUM_EVAL_EPISODES),
@@ -108,10 +159,10 @@ def train(use_gpu):
 
     replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
         tf_agent.collect_data_spec,
-        batch_size=train_env.batch_size,
+        batch_size=settings.NUM_PARALLEL_ENV,
         max_length=FRAME_NUMBER,
     )
-    
+
     train_checkpointer = common.Checkpointer(
         ckpt_dir=settings.CHECKPOINT_PATH,
         max_to_keep=1,
@@ -123,45 +174,25 @@ def train(use_gpu):
     if train_checkpointer.checkpoint_exists == True:
         print("Checkpoint uploaded")
 
-    tf_policy_saver = policy_saver.PolicySaver(tf_agent.policy)
+    tf_policy_saver = policy_saver.PolicySaver(eval_policy)
     policy_dir = os.path.join(settings.OUTPUT_PATH, "policy")
 
     tf_agent.train = common.function(tf_agent.train)
     tf_agent.train_step_counter.assign(0)
-
-    metric_utils.eager_compute(
-        eval_metrics,
-        eval_env,
-        tf_agent.policy,
-        num_episodes=settings.NUM_EVAL_EPISODES,
-        train_step=train_step_counter,
-        summary_writer=eval_summary_writer,
-        summary_prefix="Metrics",
+    
+    
+    collect_driver = dynamic_episode_driver.DynamicEpisodeDriver(
+        train_env,
+        collect_policy,
+        observers=[replay_buffer.add_batch] + train_metrics,
+        num_episodes=settings.COLLECT_EPISODES_PER_ITERATION,
     )
-
-    start_time = time.time()
-
-    for _ in range(settings.EPISODES):
-        collect_episode(
-            train_env,
-            tf_agent.collect_policy,
-            [
-                replay_buffer.add_batch,
-                tf_metrics.AverageReturnMetric(),
-                tf_metrics.AverageEpisodeLengthMetric(),
-            ],
-            settings.COLLECT_EPISODES_PER_ITERATION,
-        )
-
-        trajectories = replay_buffer.gather_all()
-        train_loss = tf_agent.train(experience=trajectories)
-
-        replay_buffer.clear()
-
-        step = tf_agent.train_step_counter.numpy()
-        print("step = {0}: loss = {1}".format(step, train_loss.loss))
-
-        if step % settings.VALIDATION_EPSIODE == 0:
+  
+    iteration = 0  
+  
+    while iteration < settings.EPISODES:
+             
+        if iteration % settings.VALIDATION_EPISODE == 0:
             metrics = metric_utils.eager_compute(
                 eval_metrics,
                 eval_env,
@@ -173,14 +204,34 @@ def train(use_gpu):
             )
 
             print(
-                "step = {0}: Average Return = {1}, Average Episode Length {2}".format(
-                    step, metrics["AverageReturn"], metrics["AverageEpisodeLength"]
+                "iteration = {0}: Average Return = {1}, Average Episode Length {2}".format(
+                    iteration, metrics["AverageReturn"], metrics["AverageEpisodeLength"]
                 )
             )
 
             train_checkpointer.save(train_step_counter)
             tf_policy_saver.save(policy_dir)
-
+            
+        collect_driver.run()
+        
+        trajectories = replay_buffer.gather_all()
+        train_loss = tf_agent.train(experience=trajectories)
+        
+        replay_buffer.clear()
+        
+        print("iteration = {0}: frame = {1} loss = {2}".format(iteration, environment_steps_metric.result(), train_loss.loss))
+        
+        iteration = iteration + 1
+    
+    metric_utils.eager_compute(
+        eval_metrics,
+        eval_env,
+        tf_agent.policy,
+        num_episodes=settings.NUM_EVAL_EPISODES,
+        train_step=train_step_counter,
+        summary_writer=eval_summary_writer,
+        summary_prefix="Metrics",
+    )
 
     if not os.path.exists(settings.MODEL_PATH):
         os.makedirs(settings.MODEL_PATH)
@@ -193,65 +244,11 @@ def train(use_gpu):
     with open(os.path.join(settings.MODEL_PATH, "policy.tflite"), "wb") as f:
         f.write(tflite_policy)
 
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-
-    print(f"Elapsed time: {elapsed_time} seconds")
-
-
-def parse_tuple(s):
-    parts = s.split("-")
-    return tuple(map(int, parts))
-
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--use-gui", action="store_true")
-    parser.add_argument(
-        "--prefix", type=str, default=os.path.dirname(os.path.abspath(__file__))
-    )
-    parser.add_argument("--episodes", type=int, default=10)
-    parser.add_argument("--validation-episode", type=int, default=5)
-    parser.add_argument("--collect-episodes-per-iteration", type=int, default=10)
-    parser.add_argument("--fc-layer-params", type=parse_tuple, default=(100, 100))
-    parser.add_argument("--num-eval-episodes", type=int, default=5)
-    parser.add_argument("--buffer-size", type=int, default=1000)
-    parser.add_argument("--learning-rate", type=float, default=0.001)
-    parser.add_argument("--entropy-rate", type=float)
-
-    args = parser.parse_args()
-
-    print(args)
-
-    settings.INPUT_PATH = os.path.join(args.prefix, "input", "data")
-    settings.OUTPUT_PATH = os.path.join(args.prefix, "output")
-    settings.MODEL_PATH = os.path.join(args.prefix, "model")
-    settings.CHECKPOINT_PATH = os.path.join(args.prefix, "checkpoints")
-    settings.USE_GUI = args.use_gui
-    settings.EPISODES = args.episodes
-    settings.COLLECT_EPISODES_PER_ITERATION = args.collect_episodes_per_iteration
-    settings.VALIDATION_EPSIODE = args.validation_episode
-    settings.NUM_EVAL_EPISODES = args.num_eval_episodes
-    settings.FC_LAYER_PARAMS = args.fc_layer_params
-    settings.BUFFER_SIZE = args.buffer_size
-    settings.LEARNING_RATE = args.learning_rate
-    settings.ENTROPY_RATE = args.entropy_rate
-
-    train_file_writer = tf.summary.create_file_writer(
-        settings.OUTPUT_PATH + "/tensorboard/train", flush_millis=1000
-    )
-    train_file_writer.set_as_default()
-
-    # tf.debugging.experimental.enable_dump_debug_info(
-    #     settings.OUTPUT_PATH + "/tensorboard",
-    #     tensor_debug_mode="FULL_HEALTH",
-    #     circular_buffer_size=-1,
-    # )
-
     print("Num GPUs Available: ", len(tf.config.list_physical_devices("GPU")))
 
-    train(len(tf.config.list_physical_devices("GPU")) > 0)
+    multiprocessing.handle_main(functools.partial(app.run, train))
 
     print("SUCCESS")
 
