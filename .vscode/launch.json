@@ -16,15 +16,15 @@
             },
             "args": [
                 "--validation_episode",
-                "2",
+                "1",
                 "--episodes",
-                "3",
-                "--collect_episodes_per_iteration",
                 "2",
+                "--collect_episodes_per_iteration",
+                "1",
                 "--num_eval_episodes",
                 "1",
                 "--number_of_parallel_envs",
-                "2"
+                "1"
             ]
         },
         {
@@ -38,8 +38,6 @@
             },
             "args": [
                 "--use_gui",
-                "--validation_episode",
-                "1",
                 "--episodes",
                 "5"
             ]

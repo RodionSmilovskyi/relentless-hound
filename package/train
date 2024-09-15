@@ -83,8 +83,10 @@ def train(_):
     settings.FC_LAYER_PARAMS = parse_tuple(flags.FLAGS.fc_layer_params)
     
     print_settings()
+    
+    tf.compat.v1.enable_v2_behavior()
 
-    train_step_counter = tf.Variable(0, dtype=tf.int64)
+    global_step = tf.Variable(0, dtype=tf.int64)
 
     train_env = tf_py_environment.TFPyEnvironment(
         parallel_py_environment.ParallelPyEnvironment([ParallelTrainingEnv] * settings.NUM_PARALLEL_ENV)
@@ -99,7 +101,7 @@ def train(_):
             RewardWrapper(CvWrapper(DroneEnv(settings.USE_GUI))),
             f"{settings.OUTPUT_PATH}/data/videos",
             episode_trigger=lambda ep_id: ep_id % settings.NUM_EVAL_EPISODES == 0,
-            name_prefix=f"validation-{train_step_counter.numpy()}",
+            name_prefix=f"validation-{global_step.numpy()}",
         )
     )
     eval_env = tf_py_environment.TFPyEnvironment(eval_py_env)
@@ -119,12 +121,10 @@ def train(_):
         activation_fn=tf.keras.activations.tanh,
     )
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=settings.LEARNING_RATE)
-
     tf_agent = ppo_clip_agent.PPOClipAgent(
         train_env.time_step_spec(),
         train_env.action_spec(),
-        optimizer,
+        optimizer = tf.keras.optimizers.Adam(learning_rate=settings.LEARNING_RATE),
         actor_net=actor_net,
         value_net=value_net,
         entropy_regularization=0.0,
@@ -133,7 +133,7 @@ def train(_):
         normalize_rewards=False,
         use_gae=True,
         num_epochs=25,
-        train_step_counter=train_step_counter,
+        train_step_counter=global_step,
     )
 
     tf_agent.initialize()
@@ -162,44 +162,52 @@ def train(_):
         max_length=FRAME_NUMBER,
     )
     
-    tf_agent.train_step_counter.assign(0)
-
-    train_checkpointer = common.Checkpointer(
-        ckpt_dir=settings.CHECKPOINT_PATH,
-        max_to_keep=1,
-        tf_agent=tf_agent,
-        train_step_counter=train_step_counter,
-        replay_buffer=replay_buffer,
-    )
-    train_checkpointer.initialize_or_restore()
-
-    if train_checkpointer.checkpoint_exists == True:
-        print("Checkpoint uploaded")
+    ckpt = tf.train.Checkpoint(global_step=global_step, replay_buffer=replay_buffer, agent=tf_agent)
+    checkpoint_manager = tf.train.CheckpointManager(ckpt, settings.CHECKPOINT_PATH, max_to_keep=1)
+    
+    if checkpoint_manager.latest_checkpoint:
+        ckpt.restore(checkpoint_manager.latest_checkpoint)
+        print("Checkpoint restored")
+    
+    # train_checkpointer = common.Checkpointer(
+    #     ckpt_dir=settings.CHECKPOINT_PATH,
+    #     max_to_keep=1,
+    #     agent=tf_agent,
+    #     global_step=global_step,
+    #     replay_buffer=replay_buffer
+    # )
+    # train_checkpointer.initialize_or_restore()
 
     tf_policy_saver = policy_saver.PolicySaver(eval_policy)
     policy_dir = os.path.join(settings.OUTPUT_PATH, "policy")
+    
+    def train_step():
+        trajectories = replay_buffer.gather_all()
+        return tf_agent.train(experience=trajectories)
 
-    tf_agent.train = common.function(tf_agent.train)
-    
-    
     collect_driver = dynamic_episode_driver.DynamicEpisodeDriver(
         train_env,
         collect_policy,
         observers=[replay_buffer.add_batch] + train_metrics,
         num_episodes=settings.COLLECT_EPISODES_PER_ITERATION,
     )
+    
+    collect_driver.run = common.function(collect_driver.run, autograph=False)
+    tf_agent.train = common.function(tf_agent.train, autograph=False)
+    train_step = common.function(train_step)
   
     iteration = 0  
   
     while iteration < settings.EPISODES:
-             
+        global_step_val = global_step.numpy()
+        
         if iteration % settings.VALIDATION_EPISODE == 0:
             metrics = metric_utils.eager_compute(
                 eval_metrics,
                 eval_env,
                 tf_agent.policy,
                 num_episodes=settings.NUM_EVAL_EPISODES,
-                train_step=train_step_counter,
+                train_step=global_step,
                 summary_writer=eval_summary_writer,
                 summary_prefix="Metrics",
             )
@@ -209,18 +217,18 @@ def train(_):
                     iteration, metrics["AverageReturn"], metrics["AverageEpisodeLength"]
                 )
             )
-
-            train_checkpointer.save(train_step_counter)
+            
             tf_policy_saver.save(policy_dir)
             
         collect_driver.run()
         
-        trajectories = replay_buffer.gather_all()
-        train_loss = tf_agent.train(experience=trajectories)
+        total_loss, _ = train_step()
+        
+        checkpoint_manager.save(0)
         
         replay_buffer.clear()
         
-        print("iteration = {0}: frame = {1} loss = {2}".format(iteration, environment_steps_metric.result(), train_loss.loss))
+        print("iteration = {0}: loss = {1}".format(iteration, total_loss))
         
         iteration = iteration + 1
     
@@ -229,7 +237,7 @@ def train(_):
         eval_env,
         tf_agent.policy,
         num_episodes=settings.NUM_EVAL_EPISODES,
-        train_step=train_step_counter,
+        train_step=global_step,
         summary_writer=eval_summary_writer,
         summary_prefix="Metrics",
     )
