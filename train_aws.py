@@ -5,7 +5,7 @@ from sagemaker.estimator import Estimator
 from sagemaker.debugger import TensorBoardOutputConfig
 
 ROLE = "arn:aws:iam::905418352696:role/SageMakerFullAccess"
-BASE_JOB_NAME = "reinforce-hover-3"
+BASE_JOB_NAME = "ppo-hover-4"
 
 boto_session = boto3.Session(
     profile_name="905418352696_AdministratorAccess", region_name="us-east-1"
@@ -21,31 +21,33 @@ tensorboard_output_config = TensorBoardOutputConfig(
 
 estimator = Estimator(
     sagemaker_session=sagemaker_session,
-    image_uri="905418352696.dkr.ecr.us-east-1.amazonaws.com/ai-repo:reinforce_discrete.532122f",
+    image_uri="905418352696.dkr.ecr.us-east-1.amazonaws.com/ai-repo:ppo_cont.67ee9fa",
     role=ROLE,
-    max_run=24 * 60 * 60,
+    max_run=2 * 60 * 60,
     base_job_name=BASE_JOB_NAME,
     instance_count=1,
-    checkpoint_s3_uri=os.path.join(default_path, 'checkpoints', BASE_JOB_NAME),
+    checkpoint_s3_uri=os.path.join(default_path, "checkpoints", BASE_JOB_NAME),
     container_arguments=[
         "train",
-        "--episodes",
-        "100",
-        "--collect-episodes-per-iteration",
-        "20",
-        "--validation-episode",
-        "10",
-        "--num-eval-episodes",
-        "5",
-        "--buffer-size",
-        "100",
-        "--learning-rate",
-        "0.001",
         "--prefix",
         "/opt/ml",
+        "--validation_episode",
+        "10",
+        "--episodes",
+        "50",
+        "--collect_episodes_per_iteration",
+        "30",
+        "--num_eval_episodes",
+        "30",
+        "--number_of_parallel_envs",
+        "30",
+        "--fc_layer_params",
+        "100-200",
+        "--importance_clipping",
+        "0.4"
     ],
     tensorboard_output_config=tensorboard_output_config,
-    instance_type="ml.g4dn.2xlarge",
+    instance_type="ml.g4dn.4xlarge",
 )
 
 

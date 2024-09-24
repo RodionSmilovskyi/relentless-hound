@@ -20,11 +20,15 @@
                 "--episodes",
                 "2",
                 "--collect_episodes_per_iteration",
-                "1",
+                "20",
                 "--num_eval_episodes",
-                "1",
+                "10",
                 "--number_of_parallel_envs",
-                "1"
+                "10",
+                "--fc_layer_params",
+                "100-200",
+                "--importance_clipping",
+                "0.4"
             ]
         },
         {
