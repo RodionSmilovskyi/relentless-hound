@@ -1,20 +1,18 @@
 import os
 import datetime
-import numpy as np
+import gym
 import tensorflow as tf
 from gym.wrappers import RecordVideo
 from package import settings
-from package.envs.cv_wrapper import CvWrapper
-from package.envs.drone import DroneEnv
-from package.envs.hover_reward_wrapper import HowerRewardWrapper as RewardWrapper
 
 EPISODES = 1
 
 settings.OUTPUT_PATH = os.path.join(settings.WORKING_DIRECTORY, "output")
 
 if __name__ == "__main__":
+    pendulum = gym.make('Pendulum-v1', g=9.81)
     env = RecordVideo(
-        RewardWrapper(CvWrapper(DroneEnv(True))),
+        pendulum,
         f"{settings.OUTPUT_PATH}/data/videos",
         episode_trigger=lambda x: True,
         name_prefix=datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"),
@@ -45,7 +43,7 @@ if __name__ == "__main__":
 
             action = env.action_space.sample()
             new_state, reward, terminated, info = env.step(action)
-            print(f"step {info['step_number']} reward {reward}")
+            print(f"reward {reward}")
 
             state = new_state
 

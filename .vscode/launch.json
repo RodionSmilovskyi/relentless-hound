@@ -16,26 +16,26 @@
             },
             "args": [
                 "--validation_episode",
-                "1",
+                "5",
                 "--episodes",
-                "2",
+                "100",
                 "--collect_episodes_per_iteration",
-                "20",
+                "100",
                 "--num_eval_episodes",
                 "10",
                 "--number_of_parallel_envs",
                 "10",
                 "--fc_layer_params",
-                "100-200",
+                "20-20",
                 "--importance_clipping",
-                "0.4"
+                "0.2"
             ]
         },
         {
-            "name": "Debug avionics",
+            "name": "Debug env",
             "type": "debugpy",
             "request": "launch",
-            "module": "test_drone",
+            "module": "test_env",
             "console": "integratedTerminal",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"

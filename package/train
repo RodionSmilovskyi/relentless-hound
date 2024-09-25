@@ -8,6 +8,7 @@ import argparse
 import time
 import functools
 import tensorflow as tf
+import gym
 
 from absl import app
 from absl import flags
@@ -31,7 +32,7 @@ from tf_agents.system import system_multiprocessing as multiprocessing
 
 class ParallelTrainingEnv(GymWrapper):
     def __init__(self):
-        super().__init__(RewardWrapper(CvWrapper(DroneEnv(False))))
+        super().__init__(gym.make('Pendulum-v1', g=9.81))
 
 def parse_tuple(s):
     parts = s.split("-")
@@ -100,7 +101,7 @@ def train(_):
 
     eval_py_env = GymWrapper(
         RecordVideo(
-            RewardWrapper(CvWrapper(DroneEnv(settings.USE_GUI))),
+            gym.make('Pendulum-v1', g=9.81),
             f"{settings.OUTPUT_PATH}/data/videos",
             episode_trigger=lambda ep_id: ep_id % settings.NUM_EVAL_EPISODES == 0,
             name_prefix=f"validation-{global_step.numpy()}",
@@ -161,7 +162,7 @@ def train(_):
     replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
         tf_agent.collect_data_spec,
         batch_size=settings.NUM_PARALLEL_ENV,
-        max_length=FRAME_NUMBER,
+        max_length=200,
     )
     
     ckpt = tf.train.Checkpoint(global_step=global_step, replay_buffer=replay_buffer, agent=tf_agent)
@@ -221,8 +222,12 @@ def train(_):
             )
             
             tf_policy_saver.save(policy_dir)
-            
-        collect_driver.run()
+        
+        episodes_collected = 0
+        
+        while episodes_collected < settings.COLLECT_EPISODES_PER_ITERATION:
+            collect_driver.run()
+            episodes_collected += settings.NUM_PARALLEL_ENV
         
         total_loss, _ = train_step()
         
