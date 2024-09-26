@@ -3,3 +3,4 @@ pybullet==3.2.6
 moviepy==1.0.3
 keras==2.14.0
 tf-agents[reverb]==0.18.0
+PyVirtualDisplay==3.0

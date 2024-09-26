@@ -16,6 +16,10 @@ ENV PYTHONPATH="/opt"
 
 WORKDIR /opt/package
 
+RUN apt-get update
+
+RUN apt-get install -y xvfb ffmpeg freeglut3-dev
+
 RUN chmod a+x train 
 
 RUN pip install -r docker_requirements.txt

@@ -12,7 +12,7 @@ rm -rf $(pwd)/test_dir/model/*
 rm -rf $(pwd)/test_dir/output/*
 
 # Capture the output of the docker run command
-output=$(docker run -v $(pwd)/test_dir:/opt/ml --rm ${image} train --prefix /opt/ml --episodes 1 --collect_episodes_per_iteration 1 --num_eval_episodes 1 --number_of_parallel_envs 1 --validation_episode 1)
+output=$(docker run -v $(pwd)/test_dir:/opt/ml --rm ${image} train --prefix /opt/ml --episodes 10 --collect_episodes_per_iteration 20 --num_eval_episodes 5 --number_of_parallel_envs 10 --validation_episode 2 --use_virtual_display)
 
 # Print the output for verification
 echo "$output"

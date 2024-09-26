@@ -18,17 +18,19 @@
                 "--validation_episode",
                 "5",
                 "--episodes",
-                "100",
-                "--collect_episodes_per_iteration",
-                "100",
-                "--num_eval_episodes",
                 "10",
+                "--collect_episodes_per_iteration",
+                "20",
+                "--num_eval_episodes",
+                "5",
                 "--number_of_parallel_envs",
                 "10",
                 "--fc_layer_params",
-                "20-20",
+                "64-64-64",
                 "--importance_clipping",
-                "0.2"
+                "0.1",
+                "--learning_rate",
+                "0.001"
             ]
         },
         {
