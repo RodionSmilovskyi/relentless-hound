@@ -93,7 +93,9 @@ flags.DEFINE_integer("number_of_parallel_envs", 5, "number of parallel envs")
 flags.DEFINE_integer("validation_episode", 5, "validation episode")
 flags.DEFINE_integer("num_eval_episodes", 30, "number of evaluation episodes")
 flags.DEFINE_integer("episodes", 10, "number of episodes")
+flags.DEFINE_integer("num_train_epochs", 10, "Number of epochs for computing policy updates")
 flags.DEFINE_float("learning_rate", 0.001, "Learning rate")
+flags.DEFINE_float("entropy", 0.01, "entropy_regularization")
 flags.DEFINE_float("importance_clipping", 0.2, "Importance clipping")
 flags.DEFINE_integer(
     "collect_episodes_per_iteration", 10, "collect-episodes-per-iteration"
@@ -115,6 +117,8 @@ def train(_):
     settings.LEARNING_RATE = flags.FLAGS.learning_rate
     settings.IMPORTANCE_CLIPPING = flags.FLAGS.importance_clipping
     settings.FC_LAYER_PARAMS = parse_tuple(flags.FLAGS.fc_layer_params)
+    settings.NUM_TRAIN_EPOCHS = flags.FLAGS.num_train_epochs
+    settings.ENTROPY = flags.FLAGS.entropy
     
     if flags.FLAGS.use_virtual_display is True:
         display = pyvirtualdisplay.Display(visible=0, size=(800, 600)).start()
@@ -160,12 +164,9 @@ def train(_):
         optimizer=tf.keras.optimizers.Adam(learning_rate=settings.LEARNING_RATE),
         actor_net=actor_net,
         value_net=value_net,
-        entropy_regularization=0.0,
+        entropy_regularization=settings.ENTROPY,
         importance_ratio_clipping=settings.IMPORTANCE_CLIPPING,
-        normalize_observations=False,
-        normalize_rewards=False,
-        use_gae=True,
-        num_epochs=25,
+        num_epochs=settings.NUM_TRAIN_EPOCHS,
         train_step_counter=global_step,
     )
 
@@ -283,6 +284,14 @@ def train(_):
         train_step=global_step,
         summary_writer=eval_summary_writer,
         summary_prefix="Metrics",
+    )
+    
+    create_policy_eval_video(eval_env, tf_agent.policy, f"{settings.OUTPUT_PATH}/data/videos/{global_step_val}", 1)
+
+    print(
+        "iteration = {0}: Average Return = {1}, Average Episode Length {2}".format(
+            iteration, metrics["AverageReturn"], metrics["AverageEpisodeLength"]
+        )
     )
 
     if not os.path.exists(settings.MODEL_PATH):
