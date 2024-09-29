@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM 763104351884.dkr.ecr.us-east-1.amazonaws.com/tensorflow-training:2.14.1-gpu-py310-cu118-ubuntu20.04-ec2
+FROM pytorch/pytorch:2.4.1-cuda11.8-cudnn9-runtime
 
 COPY package /opt/package
 

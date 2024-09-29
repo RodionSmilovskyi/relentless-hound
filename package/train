@@ -1,370 +1,209 @@
 #!/usr/bin/env python
-#pylint: skip-file
-
-import os
-import sys
-import settings
-import numpy as np
-import gym
-import argparse
+# pylint: skip-file
 import random
-import time
-import datetime
-import tensorflow as tf
-import imageio
-import io
+import sys
+from itertools import count
+import gym
+import math
+import os
 
-from gym.spaces import Discrete, Box
-from gym.wrappers import FrameStack, RecordVideo
-from typing import Optional
+import torch.optim as optim
+from collections import namedtuple, deque
+import settings
+import argparse
 
-from envs.drone import DroneEnv
-from envs.cv_wrapper import CvWrapper
-from envs.reward_wrapper import RewardWrapper
+import torch
+import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
 
-import reverb
-import tempfile
-from tf_agents.environments.gym_wrapper import GymWrapper
-from tf_agents.agents.ddpg import critic_network
-from tf_agents.agents.sac import sac_agent
-from tf_agents.agents.sac import tanh_normal_projection_network
-from tf_agents.environments import suite_pybullet
-from tf_agents.metrics import py_metrics
-from tf_agents.networks import actor_distribution_network
-from tf_agents.policies import greedy_policy
-from tf_agents.policies import py_tf_eager_policy
-from tf_agents.policies import random_py_policy
-from tf_agents.replay_buffers import reverb_replay_buffer
-from tf_agents.replay_buffers import reverb_utils
-from tf_agents.train import actor
-from tf_agents.train import learner
-from tf_agents.train import triggers
-from tf_agents.train.utils import spec_utils
-from tf_agents.train.utils import strategy_utils
-from tf_agents.train.utils import train_utils
-from tf_agents.utils import common
-
-target_update_tau = 0.005  # @param {type:"number"}
-target_update_period = 1  # @param {type:"number"}
-gamma = 0.99  # @param {type:"number"}
-reward_scale_factor = 1.0  # @param {type:"number"}
-
-log_interval = 1  # @param {type:"integer"}
-num_eval_episodes = 10  # @param {type:"integer"}
-policy_save_interval = 1  # @param {type:"integer"}
-
-tempdir = tempfile.gettempdir()
+from package.dqn import DQN
+from package.replay_memory import ReplayMemory, Transition
 
 
-def run_episodes_and_create_video(policy, eval_py_env):
-    movie_path = f"{settings.OUTPUT_PATH}/data"
-    num_episodes = 1
-    frames = []
-
-    if not os.path.exists(movie_path):
-        os.makedirs(movie_path)
-
-    for _ in range(num_episodes):
-        time_step = eval_py_env.reset()
-        frames.append(eval_py_env.render())
-        while not time_step.is_last():
-            action_step = policy.action(time_step)
-            time_step = eval_py_env.step(action_step.action)
-            frames.append(eval_py_env.render())
-
-    imageio.mimsave(
-        os.path.join(f"{settings.OUTPUT_PATH}/data", "test"),
-        frames,
-        format="gif",
-        fps=60,
-    )
+BATCH_SIZE = 128
+GAMMA = 0.99
+EPS_START = 0.9
+EPS_END = 0.05
+EPS_DECAY = 1000
+TAU = 0.005
+LR = 1e-4
 
 
-def episode_trigger_fn(episode_number):
-    if episode_number == 0 or episode_number == settings.EPISODES - 1:
-        return True
-    else:
-        return (episode_number + 1) % settings.EPISODE_TRIGGER_STEP == 0
+# if GPU is to be used
+device = torch.device(
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps" if torch.backends.mps.is_available() else "cpu"
+)
 
+steps_done = 0
 
-def create_agent(env, strategy):
-    observation_spec, action_spec, time_step_spec = spec_utils.get_tensor_specs(env)
+def train():
+    """Main training method"""
 
-    with strategy.scope():
-        critic_net = critic_network.CriticNetwork(
-            (observation_spec, action_spec),
-            observation_fc_layer_params=None,
-            action_fc_layer_params=None,
-            joint_fc_layer_params=settings.NUMBER_OF_NEURONS,
-            kernel_initializer="glorot_uniform",
-            last_kernel_initializer="glorot_uniform",
+    print(f"Used device {device.type}")
+
+   
+    writer = SummaryWriter(settings.OUTPUT_PATH + "/tensorboard")
+
+    env = gym.make("CartPole-v1")
+
+    n_actions = env.action_space.n
+    state, info = env.reset()
+    n_observations = len(state)
+    policy_net = DQN(n_observations, n_actions).to(device)
+    target_net = DQN(n_observations, n_actions).to(device)
+    target_net.load_state_dict(policy_net.state_dict())
+
+    optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
+    memory = ReplayMemory(10000)
+
+    def select_action(state):
+        global steps_done
+        sample = random.random()
+        eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(
+            -1.0 * steps_done / EPS_DECAY
         )
-
-    with strategy.scope():
-        actor_net = actor_distribution_network.ActorDistributionNetwork(
-            observation_spec,
-            action_spec,
-            fc_layer_params=settings.NUMBER_OF_NEURONS,
-            continuous_projection_net=(
-                tanh_normal_projection_network.TanhNormalProjectionNetwork
-            ),
-        )
-
-    with strategy.scope():
-        train_step = train_utils.create_train_step()
-
-        tf_agent = sac_agent.SacAgent(
-            time_step_spec,
-            action_spec,
-            actor_network=actor_net,
-            critic_network=critic_net,
-            actor_optimizer=tf.keras.optimizers.Adam(learning_rate=settings.LEARNING_RATE),
-            critic_optimizer=tf.keras.optimizers.Adam(
-                learning_rate=settings.LEARNING_RATE
-            ),
-            alpha_optimizer=tf.keras.optimizers.Adam(learning_rate=settings.LEARNING_RATE),
-            target_update_tau=target_update_tau,
-            target_update_period=target_update_period,
-            td_errors_loss_fn=tf.math.squared_difference,
-            gamma=gamma,
-            reward_scale_factor=reward_scale_factor,
-            train_step_counter=train_step,
-            debug_summaries=True,
-            summarize_grads_and_vars=True,
-        )
-
-    tf_agent.initialize()
-
-    return tf_agent, train_step
-
-
-def train(use_gpu):
-    collect_env = GymWrapper(RewardWrapper(FrameStack(CvWrapper(DroneEnv(False)), 4)))
-
-    strategy = strategy_utils.get_strategy(tpu=False, use_gpu=use_gpu)
-
-    tf_agent, train_step = create_agent(collect_env, strategy)
-
-    table_name = "uniform_table"
-    table = reverb.Table(
-        table_name,
-        max_size=settings.BUFFER_SIZE,
-        sampler=reverb.selectors.Uniform(),
-        remover=reverb.selectors.Fifo(),
-        rate_limiter=reverb.rate_limiters.MinSize(1),
-    )
-
-    reverb_server = reverb.Server([table])
-
-    replay_buffer = reverb_replay_buffer.ReverbReplayBuffer(
-        tf_agent.collect_data_spec,
-        sequence_length=tf_agent.train_sequence_length,
-        table_name=table_name,
-        local_server=reverb_server,
-    )
-
-    train_checkpointer = common.Checkpointer(
-        ckpt_dir=os.path.join(settings.OUTPUT_PATH + "/data", "checkpoint"),
-        max_to_keep=1,
-        agent=tf_agent,
-        policy=tf_agent.policy,
-        replay_buffer=replay_buffer,
-        global_step=train_step,
-    )
-
-    train_checkpointer.initialize_or_restore()
-
-    rb_observer = reverb_utils.ReverbAddTrajectoryObserver(
-        replay_buffer.py_client,
-        table_name,
-        sequence_length=tf_agent.train_sequence_length,
-        stride_length=1,
-    )
-
-    tf_eval_policy = tf_agent.policy
-    eval_policy = py_tf_eager_policy.PyTFEagerPolicy(
-        tf_eval_policy, use_tf_function=True
-    )
-
-    tf_collect_policy = tf_agent.collect_policy
-    collect_policy = py_tf_eager_policy.PyTFEagerPolicy(
-        tf_collect_policy, use_tf_function=True
-    )
-
-    if train_checkpointer.checkpoint_exists == False:
-        random_policy = random_py_policy.RandomPyPolicy(
-            collect_env.time_step_spec(), collect_env.action_spec()
-        )
-
-        initial_collect_actor = actor.Actor(
-            collect_env,
-            random_policy,
-            train_step,
-            steps_per_run=settings.BUFFER_SIZE,
-            observers=[rb_observer],
-        )
-
-        initial_collect_actor.run()
-
-    start_time = time.time()
-
-    dataset = replay_buffer.as_dataset(
-        sample_batch_size=settings.BATCH_SIZE, num_steps=tf_agent.train_sequence_length
-    ).prefetch(50)
-
-    experience_dataset_fn = lambda: dataset
-
-    env_step_metric = py_metrics.EnvironmentSteps()
-
-    collect_actor = actor.Actor(
-        collect_env,
-        collect_policy,
-        train_step,
-        episodes_per_run=1,
-        metrics=actor.collect_metrics(10),
-        summary_dir=os.path.join(
-            settings.OUTPUT_PATH + "/tensorboard", learner.TRAIN_DIR
-        ),
-        observers=[rb_observer, env_step_metric],
-    )
-
-    eval_env = GymWrapper(
-        RecordVideo(
-            RewardWrapper(FrameStack(CvWrapper(DroneEnv(settings.USE_GUI)), 4)),
-            f"{settings.OUTPUT_PATH}/data/videos",
-            episode_trigger=lambda ep_id: ep_id % num_eval_episodes == 0,
-            name_prefix=datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"),
-        )
-    )
-
-    eval_actor = actor.Actor(
-        eval_env,
-        eval_policy,
-        train_step,
-        episodes_per_run=num_eval_episodes,
-        metrics=actor.eval_metrics(num_eval_episodes),
-        summary_dir=os.path.join(settings.OUTPUT_PATH + "/tensorboard", "eval"),
-    )
-
-    saved_model_dir = os.path.join(settings.OUTPUT_PATH, learner.POLICY_SAVED_MODEL_DIR)
-
-    learning_triggers = [
-        triggers.PolicySavedModelTrigger(
-            saved_model_dir, tf_agent, train_step, interval=policy_save_interval, metadata_metrics={triggers.ENV_STEP_METADATA_KEY: env_step_metric},
-        ),
-        triggers.StepPerSecondLogTrigger(train_step, interval=100),
-    ]
-
-    agent_learner = learner.Learner(
-        tempdir,
-        train_step,
-        tf_agent,
-        experience_dataset_fn,
-        triggers=learning_triggers,
-        strategy=strategy,
-    )
-
-    def get_eval_metrics():
-        eval_actor.run()
-        results = {}
-        for metric in eval_actor.metrics:
-            results[metric.name] = metric.result()
-        return results
-
-    def log_eval_metrics(step, metrics):
-        for name, result in metrics.items():
-            tf.summary.scalar(name, data=result, step=step)
-
-    tf_agent.train_step_counter.assign(0)
-
-    client = reverb.Client(f"localhost:{reverb_server.port}")
-
-    # print(list(client.sample('uniform_table', num_samples=1)))
-
-    for _ in range(settings.EPISODES):
-        # Training.
-        collect_actor.run()
-        loss_info = agent_learner.run(iterations=1)
-
-        # Evaluating.
-        step = agent_learner.train_step_numpy
-
-        if settings.EPISODE_TRIGGER_STEP and step % settings.EPISODE_TRIGGER_STEP == 0:
-            metrics = get_eval_metrics()
-            log_eval_metrics(step, metrics)
-            train_checkpointer.save(step)
-            print(
-                "episode = {0}: average return = {1}".format(
-                    step, metrics["AverageReturn"]
-                )
+        steps_done += 1
+        if sample > eps_threshold:
+            with torch.no_grad():
+                # t.max(1) will return the largest column value of each row.
+                # second column on max result is index of where max element was
+                # found, so we pick action with the larger expected reward.
+                return policy_net(state).max(1).indices.view(1, 1)
+        else:
+            return torch.tensor(
+                [[env.action_space.sample()]], device=device, dtype=torch.long
             )
 
-        if log_interval and step % log_interval == 0:
-            print("episode = {0}: loss = {1}".format(step, loss_info.loss.numpy()))
+    def optimize_model():
+        if len(memory) < BATCH_SIZE:
+            return
+        transitions = memory.sample(BATCH_SIZE)
+        # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
+        # detailed explanation). This converts batch-array of Transitions
+        # to Transition of batch-arrays.
+        batch = Transition(*zip(*transitions))
 
-    rb_observer.close()
-    reverb_server.stop()
+        # Compute a mask of non-final states and concatenate the batch elements
+        # (a final state would've been the one after which simulation ended)
+        non_final_mask = torch.tensor(
+            tuple(map(lambda s: s is not None, batch.next_state)),
+            device=device,
+            dtype=torch.bool,
+        )
+        non_final_next_states = torch.cat(
+            [s for s in batch.next_state if s is not None]
+        )
+        state_batch = torch.cat(batch.state)
+        action_batch = torch.cat(batch.action)
+        reward_batch = torch.cat(batch.reward)
 
+        # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
+        # columns of actions taken. These are the actions which would've been taken
+        # for each batch state according to policy_net
+        state_action_values = policy_net(state_batch).gather(1, action_batch)
+
+        # Compute V(s_{t+1}) for all next states.
+        # Expected values of actions for non_final_next_states are computed based
+        # on the "older" target_net; selecting their best reward with max(1).values
+        # This is merged based on the mask, such that we'll have either the expected
+        # state value or 0 in case the state was final.
+        next_state_values = torch.zeros(BATCH_SIZE, device=device)
+        with torch.no_grad():
+            next_state_values[non_final_mask] = (
+                target_net(non_final_next_states).max(1).values
+            )
+        # Compute the expected Q values
+        expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+
+        # Compute Huber loss
+        criterion = nn.SmoothL1Loss()
+        loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
+
+        # Optimize the model
+        optimizer.zero_grad()
+        loss.backward()
+        # In-place gradient clipping
+        torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
+        optimizer.step()
+
+    if torch.cuda.is_available() or torch.backends.mps.is_available():
+        num_episodes = 600
+    else:
+        num_episodes = 50
+
+    for i_episode in range(num_episodes):
+        # Initialize the environment and get its state
+        state, info = env.reset()
+        state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+        
+        for t in count():
+            action = select_action(state)
+            observation, reward, terminated, truncated, _ = env.step(action.item())
+            reward = torch.tensor([reward], device=device)
+            done = terminated or truncated
+
+            if terminated:
+                next_state = None
+            else:
+                next_state = torch.tensor(
+                    observation, dtype=torch.float32, device=device
+                ).unsqueeze(0)
+
+            # Store the transition in memory
+            memory.push(state, action, next_state, reward)
+
+            # Move to the next state
+            state = next_state
+
+            # Perform one step of the optimization (on the policy network)
+            optimize_model()
+
+            # Soft update of the target network's weights
+            # θ′ ← τ θ + (1 −τ )θ′
+            target_net_state_dict = target_net.state_dict()
+            policy_net_state_dict = policy_net.state_dict()
+            
+            for key in policy_net_state_dict:
+                target_net_state_dict[key] = policy_net_state_dict[
+                    key
+                ] * TAU + target_net_state_dict[key] * (1 - TAU)
+                
+            target_net.load_state_dict(target_net_state_dict)
+
+            if done:
+                writer.add_scalars('Training',
+                            { 'Duration' : t + 1 }, i_episode)
+                break
+
+    print("Complete")
+    
     if not os.path.exists(settings.MODEL_PATH):
         os.makedirs(settings.MODEL_PATH)
-
-    converter = tf.lite.TFLiteConverter.from_saved_model(
-        os.path.join(saved_model_dir, "policy"), signature_keys=["action"]
-    )
-    tflite_policy = converter.convert()
-    with open(os.path.join(settings.MODEL_PATH, "policy.tflite"), "wb") as f:
-        f.write(tflite_policy)
-
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-
-    print(f"Elapsed time: {elapsed_time} seconds")
+    
+    torch.save(policy_net.state_dict(), settings.MODEL_PATH + '/model.pt')
+    
+    writer.flush()
+    writer.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-
-    parser.add_argument("--use-gui", action="store_true")
-    parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument(
         "--prefix", type=str, default=os.path.dirname(os.path.abspath(__file__))
     )
-    parser.add_argument("--episode-trigger-step", type=int, default=5)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--neurons", type=int, default=32)
-    parser.add_argument("--buffer-size", type=int, default=1000)
-    parser.add_argument("--learning-rate", type=float, default=0.001)
-
+    
     args = parser.parse_args()
 
     print(args)
-
+    
     settings.INPUT_PATH = os.path.join(args.prefix, "input", "data", "training")
     settings.OUTPUT_PATH = os.path.join(args.prefix, "output")
     settings.MODEL_PATH = os.path.join(args.prefix, "model")
-    settings.USE_GUI = args.use_gui
-    settings.EPISODES = args.episodes
-    settings.EPISODE_TRIGGER_STEP = args.episode_trigger_step
-    settings.BATCH_SIZE = args.batch_size
-    settings.NUMBER_OF_NEURONS = (args.neurons, args.neurons)
-    settings.BUFFER_SIZE = args.buffer_size
-    settings.LEARNING_RATE = args.learning_rate
-
-    file_writer = tf.summary.create_file_writer(
-        settings.OUTPUT_PATH + "/tensorboard/misc"
-    )
-    file_writer.set_as_default()
-
-    # tf.debugging.experimental.enable_dump_debug_info(
-    #     settings.OUTPUT_PATH + "/tensorboard",
-    #     tensor_debug_mode="FULL_HEALTH",
-    #     circular_buffer_size=-1,
-    # )
-
-    print("Num GPUs Available: ", len(tf.config.list_physical_devices("GPU")))
-
-    train(len(tf.config.list_physical_devices("GPU")) > 0)
     
-    print('SUCCESS')
+    train()
+
+    print("SUCCESS")
 
     sys.exit(0)

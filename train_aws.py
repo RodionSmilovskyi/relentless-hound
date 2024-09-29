@@ -1,9 +1,10 @@
+from datetime import datetime
+import os
 import boto3
 import sagemaker
-from datetime import datetime
 from sagemaker.estimator import Estimator
 from sagemaker.debugger import TensorBoardOutputConfig
-import os
+
 
 role = "arn:aws:iam::905418352696:role/SageMakerFullAccess"
 boto_session = boto3.Session(
