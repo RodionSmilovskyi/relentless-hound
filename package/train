@@ -6,6 +6,8 @@ from itertools import count
 import gym
 import math
 import os
+import imageio
+import pyvirtualdisplay
 
 import torch.optim as optim
 from collections import namedtuple, deque
@@ -46,7 +48,7 @@ def train():
    
     writer = SummaryWriter(settings.OUTPUT_PATH + "/tensorboard")
 
-    env = gym.make("CartPole-v1")
+    env = gym.make("CartPole-v1",render_mode="rgb_array")
 
     n_actions = env.action_space.n
     state, info = env.reset()
@@ -75,6 +77,29 @@ def train():
             return torch.tensor(
                 [[env.action_space.sample()]], device=device, dtype=torch.long
             )
+
+    def create_policy_eval_video(env, filename, fps=30):
+        filename = filename + ".mp4"
+        
+        directory = os.path.dirname(filename)
+        
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        with imageio.get_writer(filename, fps=fps) as video:
+            state, info = env.reset()
+            state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+            video.append_data(env.render())
+            
+            terminated = False
+
+            while not terminated:
+                action = select_action(state)
+                observation, reward, terminated, truncated, _ = env.step(action.item())
+
+                video.append_data(env.render())
+
+            video.close()
 
     def optimize_model():
         if len(memory) < BATCH_SIZE:
@@ -175,6 +200,7 @@ def train():
             if done:
                 writer.add_scalars('Training',
                             { 'Duration' : t + 1 }, i_episode)
+                create_policy_eval_video(env, f"{settings.OUTPUT_PATH}/data/videos/{i_episode}")
                 break
 
     print("Complete")
@@ -183,6 +209,11 @@ def train():
         os.makedirs(settings.MODEL_PATH)
     
     torch.save(policy_net.state_dict(), settings.MODEL_PATH + '/model.pt')
+    
+    state,_ = env.reset()
+    state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+    onnx_program = torch.onnx.export(policy_net, (state, ), dynamo=True)
+    onnx_program.save(settings.MODEL_PATH + '/model.onnx')
     
     writer.flush()
     writer.close()
@@ -193,6 +224,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--prefix", type=str, default=os.path.dirname(os.path.abspath(__file__))
     )
+    parser.add_argument("--use_virtual_display", action="store_true")
     
     args = parser.parse_args()
 
@@ -201,6 +233,9 @@ if __name__ == "__main__":
     settings.INPUT_PATH = os.path.join(args.prefix, "input", "data", "training")
     settings.OUTPUT_PATH = os.path.join(args.prefix, "output")
     settings.MODEL_PATH = os.path.join(args.prefix, "model")
+    
+    if args.use_virtual_display is True:
+        display = pyvirtualdisplay.Display(visible=0, size=(800, 600)).start()
     
     train()
 

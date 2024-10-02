@@ -1,6 +1,6 @@
-torch
-torchaudio
-torchvision
+torch==2.4.1
+torchaudio==2.4.1
+torchvision==0.19.1
 torchrl==0.5.0
 gym==0.26.2
 tqdm==4.66.5
@@ -8,5 +8,11 @@ typing_extensions==4.9.0
 matplotlib==3.9.2
 tensorboard==2.18.0
 numpy==1.23.5
+moviepy==1.0.3
+PyVirtualDisplay==3.0
+pygame==2.6.1
+onnx==1.16.2
+onnxruntime==1.19.2
+onnxscript==0.1.0.dev20241001
 --index-url https://pypi.org/simple
 --extra-index-url https://download.pytorch.org/whl/cpu
