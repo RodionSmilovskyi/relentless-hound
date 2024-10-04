@@ -39,8 +39,6 @@ device = torch.device(
     else "mps" if torch.backends.mps.is_available() else "cpu"
 )
 
-steps_done = 0
-
 
 def train():
     """Main training method"""
@@ -51,15 +49,18 @@ def train():
         "Pendulum-v1", render_mode="human" if settings.RUN_IN_CONTAINER is False and settings.USE_GUI is True else "rgb_array"
     )
 
-    model = PPO(env)
+    with torch.device(device):
+        model = PPO(env)
+
+        if os.path.exists(f'{settings.CHECKPOINT_PATH}/ppo_actor.pth') and os.path.exists(f'{settings.CHECKPOINT_PATH}/ppo_critic.pth'):
+            model.actor.load_state_dict(torch.load(f'{settings.CHECKPOINT_PATH}/ppo_actor.pth', weights_only=True))
+            model.critic.load_state_dict(torch.load(f'{settings.CHECKPOINT_PATH}/ppo_critic.pth', weights_only=True))
+            
+            print('Restored from checkpoint')
     
-    if os.path.exists(f'{settings.CHECKPOINT_PATH}/ppo_actor.pth') and os.path.exists(f'{settings.CHECKPOINT_PATH}/ppo_critic.pth'):
-        model.actor.load_state_dict(torch.load(f'{settings.CHECKPOINT_PATH}/ppo_actor.pth', weights_only=True))
-        model.critic.load_state_dict(torch.load(f'{settings.CHECKPOINT_PATH}/ppo_critic.pth', weights_only=True))
+        model.learn(settings.TOTAL_TIMESTAMPS)
         
-        print('Restored from checkpoint')
-    
-    model.learn(settings.TOTAL_TIMESTAMPS)
+        
     
 
     print("Complete")
