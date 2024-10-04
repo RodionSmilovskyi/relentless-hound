@@ -48,7 +48,7 @@ def train():
     print(f"Used device {device.type}")
 
     env = gym.make(
-        "Pendulum-v1", render_mode="human" if settings.USE_GUI is True else "rgb_array"
+        "Pendulum-v1", render_mode="human" if settings.RUN_IN_CONTAINER is False and settings.USE_GUI is True else "rgb_array"
     )
 
     model = PPO(env)
@@ -59,15 +59,17 @@ def train():
         
         print('Restored from checkpoint')
     
-    model.learn(100000)
+    model.learn(settings.TOTAL_TIMESTAMPS)
     
 
     print("Complete")
 
-    # if not os.path.exists(settings.MODEL_PATH):
-    #     os.makedirs(settings.MODEL_PATH)
+def print_settings():
+    attributes = dir(settings)
+    constants = [attr for attr in attributes if attr.isupper()]
 
-
+    for constant in constants:
+        print(f"{constant}: {getattr(settings, constant)}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -75,22 +77,31 @@ if __name__ == "__main__":
         "--prefix", type=str, default=os.path.dirname(os.path.abspath(__file__))
     )
     parser.add_argument("--use-gui", action="store_true")
+    parser.add_argument("--total-timestamps", type=int, default=10000)
+    parser.add_argument("--run-in-container", action="store_true")
 
     args = parser.parse_args()
-
-    print(args)
 
     settings.INPUT_PATH = os.path.join(args.prefix, "input", "data", "training")
     settings.OUTPUT_PATH = os.path.join(args.prefix, "output")
     settings.MODEL_PATH = os.path.join(args.prefix, "model")
     settings.CHECKPOINT_PATH = os.path.join(args.prefix, "checkpoints")
     settings.USE_GUI = args.use_gui 
+    settings.RUN_IN_CONTAINER = args.run_in_container
+    settings.TOTAL_TIMESTAMPS = args.total_timestamps
+    
+    print_settings()
+    
+    if settings.RUN_IN_CONTAINER is True:
+        display = pyvirtualdisplay.Display(visible=0, size=(800, 600)).start()
     
     if not os.path.exists(settings.MODEL_PATH):
         os.makedirs(settings.MODEL_PATH)
         
     if not os.path.exists(settings.CHECKPOINT_PATH):
         os.makedirs(settings.CHECKPOINT_PATH)
+        
+    
 
     train()
 
