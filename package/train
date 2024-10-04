@@ -52,7 +52,14 @@ def train():
     )
 
     model = PPO(env)
-    model.learn(1000000)
+    
+    if os.path.exists(f'{settings.CHECKPOINT_PATH}/ppo_actor.pth') and os.path.exists(f'{settings.CHECKPOINT_PATH}/ppo_critic.pth'):
+        model.actor.load_state_dict(torch.load(f'{settings.CHECKPOINT_PATH}/ppo_actor.pth', weights_only=True))
+        model.critic.load_state_dict(torch.load(f'{settings.CHECKPOINT_PATH}/ppo_critic.pth', weights_only=True))
+        
+        print('Restored from checkpoint')
+    
+    model.learn(100000)
     
 
     print("Complete")
