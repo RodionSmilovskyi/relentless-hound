@@ -58,7 +58,7 @@ class PPO:
         # of the graph and just convert the action to numpy array.
         # log prob as tensor is fine. Our computation graph will
         # start later down the line.
-        return action.detach().numpy(), log_prob.detach()
+        return action.detach().cpu().numpy(), log_prob.detach()
 
     def compute_rtgs(self, batch_rews):
         """The rewards-to-go (rtg) per episode per batch to return."""
@@ -142,7 +142,7 @@ class PPO:
             obs, _ = self.env.reset()
 
             while not done:
-                action = self.actor(obs).detach().numpy()
+                action = self.actor(obs).detach().cpu().numpy()
                 obs, rew, terminated, truncated, _ = self.env.step(action)
                 done = terminated | truncated
 
@@ -173,7 +173,7 @@ class PPO:
                 video.append_data(self.env.render())
 
                 while not done:
-                    action = self.actor(obs).detach().numpy()
+                    action = self.actor(obs).detach().cpu().numpy()
                     obs, rew, terminated, truncated, _ = self.env.step(action)
                     done = terminated | truncated
 
