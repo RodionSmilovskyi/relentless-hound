@@ -31,39 +31,49 @@ EPS_DECAY = 1000
 TAU = 0.005
 LR = 1e-4
 
-
-# if GPU is to be used
-device = torch.device(
-    "cuda"
-    if torch.cuda.is_available()
-    else "mps" if torch.backends.mps.is_available() else "cpu"
-)
-
-
 def train():
     """Main training method"""
+
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available() and settings.USE_GPU is True
+        else "mps" if torch.backends.mps.is_available() else "cpu"
+    )
 
     print(f"Used device {device.type}")
 
     env = gym.make(
-        "Pendulum-v1", render_mode="human" if settings.RUN_IN_CONTAINER is False and settings.USE_GUI is True else "rgb_array"
+        "Pendulum-v1",
+        render_mode=(
+            "human"
+            if settings.RUN_IN_CONTAINER is False and settings.USE_GUI is True
+            else "rgb_array"
+        ),
     )
 
     with torch.device(device):
         model = PPO(env)
 
-        if os.path.exists(f'{settings.CHECKPOINT_PATH}/ppo_actor.pth') and os.path.exists(f'{settings.CHECKPOINT_PATH}/ppo_critic.pth'):
-            model.actor.load_state_dict(torch.load(f'{settings.CHECKPOINT_PATH}/ppo_actor.pth', weights_only=True))
-            model.critic.load_state_dict(torch.load(f'{settings.CHECKPOINT_PATH}/ppo_critic.pth', weights_only=True))
-            
-            print('Restored from checkpoint')
-    
+        if os.path.exists(
+            f"{settings.CHECKPOINT_PATH}/ppo_actor.pth"
+        ) and os.path.exists(f"{settings.CHECKPOINT_PATH}/ppo_critic.pth"):
+            model.actor.load_state_dict(
+                torch.load(
+                    f"{settings.CHECKPOINT_PATH}/ppo_actor.pth", weights_only=True
+                )
+            )
+            model.critic.load_state_dict(
+                torch.load(
+                    f"{settings.CHECKPOINT_PATH}/ppo_critic.pth", weights_only=True
+                )
+            )
+
+            print("Restored from checkpoint")
+
         model.learn(settings.TOTAL_TIMESTAMPS)
-        
-        
-    
 
     print("Complete")
+
 
 def print_settings():
     attributes = dir(settings)
@@ -72,14 +82,16 @@ def print_settings():
     for constant in constants:
         print(f"{constant}: {getattr(settings, constant)}")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--prefix", type=str, default=os.path.dirname(os.path.abspath(__file__))
     )
     parser.add_argument("--use-gui", action="store_true")
-    parser.add_argument("--total-timestamps", type=int, default=10000)
+    parser.add_argument("--use-gpu", action="store_true")
     parser.add_argument("--run-in-container", action="store_true")
+    parser.add_argument("--total-timestamps", type=int, default=10000)
 
     args = parser.parse_args()
 
@@ -87,22 +99,21 @@ if __name__ == "__main__":
     settings.OUTPUT_PATH = os.path.join(args.prefix, "output")
     settings.MODEL_PATH = os.path.join(args.prefix, "model")
     settings.CHECKPOINT_PATH = os.path.join(args.prefix, "checkpoints")
-    settings.USE_GUI = args.use_gui 
+    settings.USE_GUI = args.use_gui
+    settings.USE_GPU = args.use_gpu
     settings.RUN_IN_CONTAINER = args.run_in_container
     settings.TOTAL_TIMESTAMPS = args.total_timestamps
-    
+
     print_settings()
-    
+
     if settings.RUN_IN_CONTAINER is True:
         display = pyvirtualdisplay.Display(visible=0, size=(800, 600)).start()
-    
+
     if not os.path.exists(settings.MODEL_PATH):
         os.makedirs(settings.MODEL_PATH)
-        
+
     if not os.path.exists(settings.CHECKPOINT_PATH):
         os.makedirs(settings.CHECKPOINT_PATH)
-        
-    
 
     train()
 
