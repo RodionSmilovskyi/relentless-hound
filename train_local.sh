@@ -12,7 +12,7 @@ rm -rf $(pwd)/test_dir/model/*
 rm -rf $(pwd)/test_dir/output/*
 
 # Capture the output of the docker run command
-output=$(docker run -v $(pwd)/test_dir:/opt/ml --rm ${image} train --prefix /opt/ml --run-in-container --total-timestamps 50000)
+output=$(docker run -v $(pwd)/test_dir:/opt/ml --rm ${image} train --prefix /opt/ml --run-in-container --total-timesteps 50000)
 
 # Print the output for verification
 echo "$output"

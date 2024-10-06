@@ -31,16 +31,16 @@ class PPO:
 
         # Create the covariance matrix
         self.cov_mat = torch.diag(self.cov_var)
-        
+
         self.writer = SummaryWriter(settings.OUTPUT_PATH + "/tensorboard")
 
     def _init_hyperparameters(self):
-        self.timesteps_per_batch = 5000  # timesteps per batch
+        self.timesteps_per_batch = settings.TIMESTEPS_PER_BATCH  # timesteps per batch
         self.max_timesteps_per_episode = 1000  # timesteps per episode
         self.gamma = 0.95
         self.n_updates_per_iteration = 5
         self.clip = 0.2  # As recommended by the paper
-        self.lr = 0.005
+        self.lr = settings.LEARN_RATE
 
     def get_action(self, obs):
         """Query the actor network for a mean action."""
@@ -153,12 +153,11 @@ class PPO:
 
         avg_return = np.mean(np.array(ep_returns))
 
-        print(
-            f"Iteration {iteration} Step {step} Average return {avg_return}"
-        )
-        self.writer.add_scalars('Training', { 'Average return' : avg_return }, step)
+        print(f"Iteration {iteration} Step {step} Average return {avg_return}")
+        self.writer.add_scalar("Average return", avg_return, step)
 
     def create_policy_eval_video(self, filename, num_episodes=5, fps=30):
+        """Record video of policy in action"""
         filename = filename + ".mp4"
 
         directory = os.path.dirname(filename)
@@ -194,13 +193,13 @@ class PPO:
         # Return predicted values V and log probs log_probs
         return V, log_probs
 
-    def learn(self, total_timestamps):
+    def learn(self, total_timesteps):
         """Main method"""
 
         t_so_far = 0
         i_so_far = 0  # Iterations ran so far
 
-        while t_so_far < total_timestamps:
+        while t_so_far < total_timesteps:
             batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens = (
                 self.rollout()
             )
@@ -220,11 +219,28 @@ class PPO:
 
             if i_so_far % 10 == 0:
                 self.evaluate_policy(t_so_far, i_so_far, 10)
-                self.create_policy_eval_video(f"{settings.OUTPUT_PATH}/data/videos/{i_so_far}", 1)
-                torch.save(self.actor.state_dict(), f'{settings.CHECKPOINT_PATH}/ppo_actor.pth')
-                torch.save(self.critic.state_dict(), f'{settings.CHECKPOINT_PATH}/ppo_critic.pth')
+                self.create_policy_eval_video(
+                    f"{settings.OUTPUT_PATH}/data/videos/{i_so_far}", 1
+                )
+                torch.save(
+                    self.actor.state_dict(), f"{settings.CHECKPOINT_PATH}/ppo_actor.pth"
+                )
+                torch.save(
+                    self.critic.state_dict(),
+                    f"{settings.CHECKPOINT_PATH}/ppo_critic.pth",
+                )
 
             for _ in range(self.n_updates_per_iteration):
+                frac = (t_so_far - 1.0) / total_timesteps
+                new_lr = self.lr * (1.0 - frac)
+
+                # Make sure learning rate doesn't go below 0
+                new_lr = max(new_lr, 0.0)
+                self.actor_optim.param_groups[0]["lr"] = new_lr
+                self.critic_optim.param_groups[0]["lr"] = new_lr
+
+                self.writer.add_scalar("Learning rate", new_lr, t_so_far)
+
                 # Calculate pi_theta(a_t | s_t)
                 V, curr_log_probs = self.evaluate(batch_obs, batch_acts)
 
@@ -247,13 +263,12 @@ class PPO:
                 self.critic_optim.zero_grad()
                 critic_loss.backward()
                 self.critic_optim.step()
-                
 
-        state,_ = self.env.reset()
+        state, _ = self.env.reset()
         state = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-        onnx_program = torch.onnx.export(self.actor, (state, ), dynamo=True)
-        onnx_program.save(settings.MODEL_PATH + '/model.onnx')
-        torch.save(self.actor.state_dict(), settings.MODEL_PATH + '/model.pth')
+        onnx_program = torch.onnx.export(self.actor, (state,), dynamo=True)
+        onnx_program.save(settings.MODEL_PATH + "/model.onnx")
+        torch.save(self.actor.state_dict(), settings.MODEL_PATH + "/model.pth")
 
         self.writer.flush()
         self.writer.close()

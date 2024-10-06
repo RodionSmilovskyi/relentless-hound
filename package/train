@@ -59,18 +59,18 @@ def train():
         ) and os.path.exists(f"{settings.CHECKPOINT_PATH}/ppo_critic.pth"):
             model.actor.load_state_dict(
                 torch.load(
-                    f"{settings.CHECKPOINT_PATH}/ppo_actor.pth", weights_only=True
+                    f"{settings.CHECKPOINT_PATH}/ppo_actor.pth", weights_only=True, map_location=device
                 )
             )
             model.critic.load_state_dict(
                 torch.load(
-                    f"{settings.CHECKPOINT_PATH}/ppo_critic.pth", weights_only=True
+                    f"{settings.CHECKPOINT_PATH}/ppo_critic.pth", weights_only=True, map_location=device
                 )
             )
 
             print("Restored from checkpoint")
 
-        model.learn(settings.TOTAL_TIMESTAMPS)
+        model.learn(settings.TOTAL_TIMESTEPS)
 
     print("Complete")
 
@@ -91,7 +91,9 @@ if __name__ == "__main__":
     parser.add_argument("--use-gui", action="store_true")
     parser.add_argument("--use-gpu", action="store_true")
     parser.add_argument("--run-in-container", action="store_true")
-    parser.add_argument("--total-timestamps", type=int, default=10000)
+    parser.add_argument("--total-timesteps", type=int, default=10000)
+    parser.add_argument("--timesteps-per-batch", type=int, default=1000)
+    parser.add_argument("--learn-rate", type=float, default=0.001)
 
     args = parser.parse_args()
 
@@ -102,7 +104,9 @@ if __name__ == "__main__":
     settings.USE_GUI = args.use_gui
     settings.USE_GPU = args.use_gpu
     settings.RUN_IN_CONTAINER = args.run_in_container
-    settings.TOTAL_TIMESTAMPS = args.total_timestamps
+    settings.TOTAL_TIMESTEPS = args.total_timesteps
+    settings.TIMESTEPS_PER_BATCH = args.timesteps_per_batch
+    settings.LEARN_RATE = args.learn_rate
 
     print_settings()
 
