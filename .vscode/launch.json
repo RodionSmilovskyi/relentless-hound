@@ -11,7 +11,7 @@
             "program": "package/train",
             "console": "integratedTerminal",
             "env": { "PYTHONPATH": "${workspaceFolder}", "WRAPT_DISABLE_EXTENSIONS": "true" },
-            "args": ["--total-timesteps", "100000", "--learn-rate", "0.01"]
+            "args": ["--total-timesteps", "500000", "--learn-rate", "0.001", "--entropy", "0.2", "--timesteps-per-batch", "10000"]
         }
     ]
 }

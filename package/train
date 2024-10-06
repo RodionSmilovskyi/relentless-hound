@@ -94,6 +94,7 @@ if __name__ == "__main__":
     parser.add_argument("--total-timesteps", type=int, default=10000)
     parser.add_argument("--timesteps-per-batch", type=int, default=1000)
     parser.add_argument("--learn-rate", type=float, default=0.001)
+    parser.add_argument("--entropy", type=float, default=0.02)
 
     args = parser.parse_args()
 
@@ -107,6 +108,7 @@ if __name__ == "__main__":
     settings.TOTAL_TIMESTEPS = args.total_timesteps
     settings.TIMESTEPS_PER_BATCH = args.timesteps_per_batch
     settings.LEARN_RATE = args.learn_rate
+    settings.ENTROPY_COEF = args.entropy
 
     print_settings()
 

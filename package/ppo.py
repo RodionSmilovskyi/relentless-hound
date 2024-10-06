@@ -41,6 +41,7 @@ class PPO:
         self.n_updates_per_iteration = 5
         self.clip = 0.2  # As recommended by the paper
         self.lr = settings.LEARN_RATE
+        self.ent_coef = settings.ENTROPY_COEF
 
     def get_action(self, obs):
         """Query the actor network for a mean action."""
@@ -191,7 +192,7 @@ class PPO:
         dist = MultivariateNormal(mean, self.cov_mat)
         log_probs = dist.log_prob(batch_acts)
         # Return predicted values V and log probs log_probs
-        return V, log_probs
+        return V, log_probs, dist.entropy()
 
     def learn(self, total_timesteps):
         """Main method"""
@@ -209,7 +210,7 @@ class PPO:
             i_so_far += 1
 
             # Calculate V_{phi, k}
-            V, _ = self.evaluate(batch_obs, batch_acts)
+            V, _, entropy = self.evaluate(batch_obs, batch_acts)
             # ALG STEP 5
             # Calculate advantage
             A_k = batch_rtgs - V.detach()
@@ -242,7 +243,7 @@ class PPO:
                 self.writer.add_scalar("Learning rate", new_lr, t_so_far)
 
                 # Calculate pi_theta(a_t | s_t)
-                V, curr_log_probs = self.evaluate(batch_obs, batch_acts)
+                V, curr_log_probs, entropy = self.evaluate(batch_obs, batch_acts)
 
                 # Calculate ratios
                 ratios = torch.exp(curr_log_probs - batch_log_probs)
@@ -252,7 +253,11 @@ class PPO:
                 surr2 = torch.clamp(ratios, 1 - self.clip, 1 + self.clip) * A_k
                 actor_loss = (-torch.min(surr1, surr2)).mean()
                 critic_loss = nn.MSELoss()(V, batch_rtgs)
-
+                
+                #Entropy regularization
+                entropy_loss = entropy.mean()
+                actor_loss = actor_loss - self.ent_coef * entropy_loss 
+                self.writer.add_scalar("Entropy loss", entropy_loss, t_so_far)
                 # Calculate gradients and perform backward propagation for actor
                 # network
                 self.actor_optim.zero_grad()
