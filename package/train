@@ -43,7 +43,7 @@ def train():
     print(f"Used device {device.type}")
 
     env = gym.make(
-        "Pendulum-v1",
+        "Ant-v4",
         render_mode=(
             "human"
             if settings.RUN_IN_CONTAINER is False and settings.USE_GUI is True

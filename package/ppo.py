@@ -35,8 +35,8 @@ class PPO:
         self.writer = SummaryWriter(settings.OUTPUT_PATH + "/tensorboard")
 
     def _init_hyperparameters(self):
-        self.timesteps_per_batch = 4800  # timesteps per batch
-        self.max_timesteps_per_episode = 1600  # timesteps per episode
+        self.timesteps_per_batch = 5000  # timesteps per batch
+        self.max_timesteps_per_episode = 1000  # timesteps per episode
         self.gamma = 0.95
         self.n_updates_per_iteration = 5
         self.clip = 0.2  # As recommended by the paper
