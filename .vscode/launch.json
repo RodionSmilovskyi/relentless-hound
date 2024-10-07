@@ -10,8 +10,24 @@
             "request": "launch",
             "program": "package/train",
             "console": "integratedTerminal",
-            "env": { "PYTHONPATH": "${workspaceFolder}", "WRAPT_DISABLE_EXTENSIONS": "true" },
-            "args": ["--total-timesteps", "500000", "--learn-rate", "0.001", "--entropy", "0.2", "--timesteps-per-batch", "10000"]
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "WRAPT_DISABLE_EXTENSIONS": "true"
+            },
+            "args": [
+                "--total-timesteps",
+                "500000",
+                "--learn-rate",
+                "0.0005",
+                "--entropy",
+                "0.5",
+                "--timesteps-per-batch",
+                "10000",
+                "--num-minibatches",
+                "4",
+                "--use-noise",
+                "--use-lr-ann"
+            ]
         }
     ]
 }

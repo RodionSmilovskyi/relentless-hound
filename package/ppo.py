@@ -6,7 +6,7 @@ from torch.optim import Adam
 from torch import nn
 from torch.distributions import MultivariateNormal
 from package import settings
-from package.network import FeedForwardNN
+from package.network import FeedForwardNN, NoisyFeedForwardNN
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -18,7 +18,11 @@ class PPO:
         self.obs_dim = env.observation_space.shape[0]
         self.act_dim = env.action_space.shape[0]
 
-        self.actor = FeedForwardNN(self.obs_dim, self.act_dim)
+        self.actor = (
+            NoisyFeedForwardNN(self.obs_dim, self.act_dim)
+            if settings.USE_NOISE is True
+            else FeedForwardNN(self.obs_dim, self.act_dim)
+        )
         self.critic = FeedForwardNN(self.obs_dim, 1)
 
         self._init_hyperparameters()
@@ -42,6 +46,7 @@ class PPO:
         self.clip = 0.2  # As recommended by the paper
         self.lr = settings.LEARN_RATE
         self.ent_coef = settings.ENTROPY_COEF
+        self.num_minibatches = settings.NUM_MINIBATCHES
 
     def get_action(self, obs):
         """Query the actor network for a mean action."""
@@ -218,6 +223,82 @@ class PPO:
             # Normalize advantages
             A_k = (A_k - A_k.mean()) / (A_k.std() + 1e-10)
 
+            step = batch_obs.size(0)
+            inds = np.arange(step)
+            minibatch_size = step // self.num_minibatches
+            actor_losses = []
+            critic_losses = []
+            entropy_losses = []
+
+            for _ in range(self.n_updates_per_iteration):
+                if settings.USE_LR_ANN:
+                    frac = (t_so_far - 1.0) / total_timesteps
+                    new_lr = self.lr * (1.0 - frac)
+
+                    # Make sure learning rate doesn't go below 0
+                    new_lr = max(new_lr, 0.0)
+                    self.actor_optim.param_groups[0]["lr"] = new_lr
+                    self.critic_optim.param_groups[0]["lr"] = new_lr
+
+                    self.writer.add_scalar("Learning rate", new_lr, t_so_far)
+
+                np.random.shuffle(inds)  # Shuffling the index
+
+                if settings.USE_NOISE is True:
+                    self.actor.noisy_layer.reset_noise()
+
+                for start in range(0, step, minibatch_size):
+                    end = start + minibatch_size
+                    idx = inds[start:end]
+                    # Extract data at the sampled indices
+                    mini_obs = batch_obs[idx]
+                    mini_acts = batch_acts[idx]
+                    mini_log_prob = batch_log_probs[idx]
+                    mini_advantage = A_k[idx]
+                    mini_rtgs = batch_rtgs[idx]
+
+                    # Calculate pi_theta(a_t | s_t)
+                    V, curr_log_probs, entropy = self.evaluate(mini_obs, mini_acts)
+
+                    # Calculate ratios
+                    ratios = torch.exp(curr_log_probs - mini_log_prob)
+
+                    # Calculate surrogate losses
+                    surr1 = ratios * mini_advantage
+                    surr2 = (
+                        torch.clamp(ratios, 1 - self.clip, 1 + self.clip)
+                        * mini_advantage
+                    )
+                    actor_loss = (-torch.min(surr1, surr2)).mean()
+                    critic_loss = nn.MSELoss()(V, mini_rtgs)
+
+                    # Entropy regularization
+                    entropy_loss = entropy.mean()
+                    actor_loss = actor_loss - self.ent_coef * entropy_loss
+
+                    # Calculate gradients and perform backward propagation for actor
+                    # network
+                    self.actor_optim.zero_grad()
+                    actor_loss.backward()
+                    self.actor_optim.step()
+
+                    # Calculate gradients and perform backward propagation for critic network
+                    self.critic_optim.zero_grad()
+                    critic_loss.backward()
+                    self.critic_optim.step()
+
+                    actor_losses.append(actor_loss.detach())
+                    critic_losses.append(critic_loss.detach())
+                    entropy_losses.append(entropy_loss.detach())
+
+            avg_actor_loss = sum(actor_losses) / len(actor_losses)
+            avg_crtic_loss = sum(critic_losses) / len(critic_losses)
+            avg_entropy_loss = sum(entropy_losses) / len(entropy_losses)
+            
+            self.writer.add_scalar("Actor loss", avg_actor_loss, t_so_far)
+            self.writer.add_scalar("Critic loss", avg_crtic_loss, t_so_far)
+            self.writer.add_scalar("Entropy loss", avg_entropy_loss, t_so_far)
+
             if i_so_far % 10 == 0:
                 self.evaluate_policy(t_so_far, i_so_far, 10)
                 self.create_policy_eval_video(
@@ -230,44 +311,6 @@ class PPO:
                     self.critic.state_dict(),
                     f"{settings.CHECKPOINT_PATH}/ppo_critic.pth",
                 )
-
-            for _ in range(self.n_updates_per_iteration):
-                frac = (t_so_far - 1.0) / total_timesteps
-                new_lr = self.lr * (1.0 - frac)
-
-                # Make sure learning rate doesn't go below 0
-                new_lr = max(new_lr, 0.0)
-                self.actor_optim.param_groups[0]["lr"] = new_lr
-                self.critic_optim.param_groups[0]["lr"] = new_lr
-
-                self.writer.add_scalar("Learning rate", new_lr, t_so_far)
-
-                # Calculate pi_theta(a_t | s_t)
-                V, curr_log_probs, entropy = self.evaluate(batch_obs, batch_acts)
-
-                # Calculate ratios
-                ratios = torch.exp(curr_log_probs - batch_log_probs)
-
-                # Calculate surrogate losses
-                surr1 = ratios * A_k
-                surr2 = torch.clamp(ratios, 1 - self.clip, 1 + self.clip) * A_k
-                actor_loss = (-torch.min(surr1, surr2)).mean()
-                critic_loss = nn.MSELoss()(V, batch_rtgs)
-                
-                #Entropy regularization
-                entropy_loss = entropy.mean()
-                actor_loss = actor_loss - self.ent_coef * entropy_loss 
-                self.writer.add_scalar("Entropy loss", entropy_loss, t_so_far)
-                # Calculate gradients and perform backward propagation for actor
-                # network
-                self.actor_optim.zero_grad()
-                actor_loss.backward()
-                self.actor_optim.step()
-
-                # Calculate gradients and perform backward propagation for critic network
-                self.critic_optim.zero_grad()
-                critic_loss.backward()
-                self.critic_optim.step()
 
         state, _ = self.env.reset()
         state = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
