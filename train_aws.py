@@ -5,7 +5,7 @@ from sagemaker.estimator import Estimator
 from sagemaker.debugger import TensorBoardOutputConfig
 
 ROLE = "arn:aws:iam::905418352696:role/SageMakerFullAccess"
-BASE_JOB_NAME = "pytorch-ppo-ant-5000"
+BASE_JOB_NAME = "pytorch-ppo-ant"
 
 boto_session = boto3.Session(
     profile_name="905418352696_AdministratorAccess", region_name="us-east-1"
@@ -21,7 +21,7 @@ tensorboard_output_config = TensorBoardOutputConfig(
 
 estimator = Estimator(
     sagemaker_session=sagemaker_session,
-    image_uri="905418352696.dkr.ecr.us-east-1.amazonaws.com/ai-repo:pytorch_ppo_ant.bfeeb2a",
+    image_uri="905418352696.dkr.ecr.us-east-1.amazonaws.com/ai-repo:pytorch_ppo_ant.1c42a06",
     role=ROLE,
     max_run=3 * 60 * 60,
     base_job_name=BASE_JOB_NAME,
@@ -33,13 +33,16 @@ estimator = Estimator(
         "/opt/ml",
         "--run-in-container",
         "--total-timesteps",
-        "3000000",
+        "2000000",
         "--learn-rate",
-        "0.005",
+        "0.0005",
         "--entropy",
-        "0.3",
+        "0",
         "--timesteps-per-batch",
-        "5000"
+        "10000",
+        "--num-minibatches",
+        "5",
+        "--use-noise"
     ],
     tensorboard_output_config=tensorboard_output_config,
     instance_type="ml.g4dn.2xlarge",

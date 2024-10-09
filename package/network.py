@@ -35,7 +35,7 @@ class NoisyFeedForwardNN(nn.Module):
 
         self.layer1 = nn.Linear(in_dim, 64)
         self.layer2 = nn.Linear(64, 64)
-        self.noisy_layer = NoisyLinear(64, out_dim)
+        self.noisy_layer = NoisyLinear(64, out_dim, std_init=0.5)
 
     def forward(self, obs):
         """Forward pass on network"""

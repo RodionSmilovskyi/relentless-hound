@@ -18,11 +18,7 @@ class PPO:
         self.obs_dim = env.observation_space.shape[0]
         self.act_dim = env.action_space.shape[0]
 
-        self.actor = (
-            NoisyFeedForwardNN(self.obs_dim, self.act_dim)
-            if settings.USE_NOISE is True
-            else FeedForwardNN(self.obs_dim, self.act_dim)
-        )
+        self.actor = FeedForwardNN(self.obs_dim, self.act_dim)
         self.critic = FeedForwardNN(self.obs_dim, 1)
 
         self._init_hyperparameters()
@@ -48,12 +44,17 @@ class PPO:
         self.ent_coef = settings.ENTROPY_COEF
         self.num_minibatches = settings.NUM_MINIBATCHES
 
-    def get_action(self, obs):
+    def get_action(self, obs, noise_std = None):
         """Query the actor network for a mean action."""
         # Same thing as calling self.actor.forward(obs)
-        mean = self.actor(obs)
+        actions = self.actor(obs)
+        
+        if noise_std is not None:
+            noise = torch.normal(mean=0, std=noise_std, size=actions.size())
+            actions = actions + noise
+        
         # Create our Multivariate Normal Distribution
-        dist = MultivariateNormal(mean, self.cov_mat)
+        dist = MultivariateNormal(actions, self.cov_mat)
         # Sample an action from the distribution and get its log prob
         action = dist.sample()
         log_prob = dist.log_prob(action)
@@ -66,6 +67,11 @@ class PPO:
         # start later down the line.
         return action.detach().cpu().numpy(), log_prob.detach()
 
+    def get_noise_annealing(self, initial_noise_std, final_noise_std, step, total_steps):
+        """Noise annealing approach"""
+        return initial_noise_std - (initial_noise_std - final_noise_std) * (step / total_steps)
+        
+        
     def compute_rtgs(self, batch_rews):
         """The rewards-to-go (rtg) per episode per batch to return."""
         # The shape will be (num timesteps per episode)
@@ -81,7 +87,7 @@ class PPO:
         batch_rtgs = torch.tensor(batch_rtgs, dtype=torch.float)
         return batch_rtgs
 
-    def rollout(self):
+    def rollout(self, step, total_timesteps):
         """Env rollout"""
         batch_obs = []  # batch observations
         batch_acts = []  # batch actions
@@ -96,12 +102,18 @@ class PPO:
 
         # Number of timesteps run so far this batch
         t = 0
+        
+        noise_std = self.get_noise_annealing(settings.NOISE_ANN[0], settings.NOISE_ANN[1], step, total_timesteps)
+        
         while t < self.timesteps_per_batch:
             # Rewards this episode
             ep_rews = []
 
             obs, _ = self.env.reset()
             done = False
+            
+            # if settings.USE_NOISE is True:
+            #     self.actor.noisy_layer.reset_noise()
 
             for ep_t in range(self.max_timesteps_per_episode):
                 # Increment timesteps ran this batch so far
@@ -110,9 +122,9 @@ class PPO:
                 # Collect observation
                 batch_obs.append(obs)
 
-                action, log_prob = self.get_action(obs)
+                action, log_prob = self.get_action(obs, noise_std)
+                
                 obs, rew, terminated, truncated, _ = self.env.step(action)
-
                 # Don't really care about the difference between terminated or truncated in this, so just combine them
                 done = terminated | truncated
 
@@ -196,6 +208,7 @@ class PPO:
         mean = self.actor(batch_obs)
         dist = MultivariateNormal(mean, self.cov_mat)
         log_probs = dist.log_prob(batch_acts)
+        
         # Return predicted values V and log probs log_probs
         return V, log_probs, dist.entropy()
 
@@ -206,9 +219,7 @@ class PPO:
         i_so_far = 0  # Iterations ran so far
 
         while t_so_far < total_timesteps:
-            batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens = (
-                self.rollout()
-            )
+            batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens = self.rollout(t_so_far, total_timesteps)            
 
             # Calculate how many timesteps we collected this batch
             t_so_far += np.sum(batch_lens)
@@ -244,9 +255,6 @@ class PPO:
 
                 np.random.shuffle(inds)  # Shuffling the index
 
-                if settings.USE_NOISE is True:
-                    self.actor.noisy_layer.reset_noise()
-
                 for start in range(0, step, minibatch_size):
                     end = start + minibatch_size
                     idx = inds[start:end]
@@ -279,7 +287,7 @@ class PPO:
                     # Calculate gradients and perform backward propagation for actor
                     # network
                     self.actor_optim.zero_grad()
-                    actor_loss.backward()
+                    actor_loss.backward(retain_graph=True)
                     self.actor_optim.step()
 
                     # Calculate gradients and perform backward propagation for critic network

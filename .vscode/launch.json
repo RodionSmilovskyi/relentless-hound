@@ -16,17 +16,17 @@
             },
             "args": [
                 "--total-timesteps",
-                "500000",
+                "1000000",
                 "--learn-rate",
-                "0.0005",
+                "0.0001",
                 "--entropy",
                 "0.5",
                 "--timesteps-per-batch",
                 "10000",
                 "--num-minibatches",
-                "4",
-                "--use-noise",
-                "--use-lr-ann"
+                "5",
+                "--noise-ann",
+                "0.6-0.2"
             ]
         }
     ]

@@ -31,6 +31,10 @@ EPS_DECAY = 1000
 TAU = 0.005
 LR = 1e-4
 
+def parse_tuple(s):
+    parts = s.split("-")
+    return tuple(map(float, parts))
+
 def train():
     """Main training method"""
 
@@ -97,6 +101,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-minibatches", type=int, default=5)
     parser.add_argument("--timesteps-per-batch", type=int, default=1000)
     parser.add_argument("--learn-rate", type=float, default=0.001)
+    parser.add_argument("--noise-ann", type=parse_tuple, default=(0.1, 0.1))
     parser.add_argument("--entropy", type=float, default=0.02)
 
     args = parser.parse_args()
@@ -115,6 +120,7 @@ if __name__ == "__main__":
     settings.ENTROPY_COEF = args.entropy
     settings.NUM_MINIBATCHES = args.num_minibatches
     settings.USE_LR_ANN = args.use_lr_ann
+    settings.NOISE_ANN = args.noise_ann
 
     print_settings()
 
